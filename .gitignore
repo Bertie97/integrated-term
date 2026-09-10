@@ -3,5 +3,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .DS_Store
+/processes.json
 processes.local.json
 *.app/
