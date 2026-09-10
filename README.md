@@ -23,9 +23,15 @@ Windows 命令块使用 `\\` 表示路径分隔符，多行命令使用 `^` 续�
 
 ## 启动
 
+安装 uv 后，在本项目目录运行：
+
 ```bash
-python3 app.py
+uv run python app.py
 ```
+
+项目通过 `.python-version` 固定使用 uv 管理的 Python 3.13.14，首次运行会按需下载解释器并在本项目内创建 `.venv`。无需激活环境或指定本机 Python 路径，也不会使用父目录的项目环境。控制台没有额外的 pip 运行依赖；Tk 随 Python 发行版提供。配置采用 uv 的 [`python-preference = "only-managed"`](https://docs.astral.sh/uv/reference/settings/#python-preference)。旧的 Python 3.13.5 构建在虚拟环境中存在 Tcl 资源定位问题，因此不要复用该旧版本。
+
+上述配置只管理控制台自身的环境；进程列表里的命令仍使用各自项目的运行环境。
 
 ### Linux 打包
 

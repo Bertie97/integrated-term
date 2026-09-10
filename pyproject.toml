@@ -1,0 +1,10 @@
+[project]
+name = "integrated-term"
+version = "0.1.0"
+description = "A desktop console for managing BCI processes and their output."
+requires-python = ">=3.13.14,<3.14"
+dependencies = []
+
+[tool.uv]
+package = false
+python-preference = "only-managed"
