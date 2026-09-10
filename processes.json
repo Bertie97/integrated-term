@@ -1,0 +1,641 @@
+{
+  "root_dir": "/Users/apple/文档空间/学术平台/脑机接口/飞控系统",
+  "groups": [
+    {
+      "name": "环境配置",
+      "locked": false,
+      "expanded": true,
+      "processes": [
+        {
+          "name": "🏝️ 配置脑机环境",
+          "command": "cd coadptation-emg-bci-cursor-control-NMI\nuv sync",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": []
+        },
+        {
+          "name": "🛜 LSL信息流监控",
+          "command": "cd LSL-Viewer\nuv run lsl-viewer",
+          "enabled": true,
+          "gui_mode": "show",
+          "lsl_streams": []
+        },
+        {
+          "name": "📷 相机参数标定",
+          "command": "cd MuJoCo_Sim/bci-control-drone\nenv -u PYTHONPATH uv run \\\n  python tools/calibrate_belly_camera/calibrate.py \\\n  --board-image tools/calibrate_belly_camera/board_10x7_20mm_300dpi.png \\\n  --output config/cameras/belly_camera.yaml \\\n  --frames 25 \\\n  --sample-interval 0.1 \\\n  --min-view-shift-px 8 \\\n  --hold-seconds 0.35 \\\n  --max-corner-motion-px 1.5 \\\n  --min-coverage-regions 5 \\\n  --min-scale-span 0.15 \\\n  --min-perspective-span 0.04",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": []
+        },
+        {
+          "name": "🔑 生成起飞密钥",
+          "command": "cd MuJoCo_Sim/bci-control-sim\nuv run python scripts/generate_takeoff_keys.py \\\n  --private-key ~/.config/bci-control/takeoff_ed25519_private.pem \\\n  --public-key ~/.config/bci-control/controller.pub",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": []
+        }
+      ]
+    },
+    {
+      "name": "💪🏻 肌电信号",
+      "locked": false,
+      "expanded": true,
+      "processes": [
+        {
+          "name": "💪🏻 肌电数据回放",
+          "command": "cd coadptation-emg-bci-cursor-control-NMI\nuv run python -m scripts.emg_drone_task.mock_keyboard_emg_source",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "emg_raw_signed_2khz",
+              "type": "EMG",
+              "evidence": [
+                {
+                  "file": "scripts/emg_drone_task/mock_keyboard_emg_source.py",
+                  "line": 288
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "🖥️ 肌电信号监测",
+          "command": "cd coadptation-emg-bci-cursor-control-NMI\nuv run python scripts/emg_drone_task/monitor_raw_emg_stream.py",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": []
+        },
+        {
+          "name": "📻 肌电全链路工作台",
+          "command": "cd coadptation-emg-bci-cursor-control-NMI\nuv run python -m trainer.emg_drone_task.workbench \\\n  --decoder /Users/apple/文档空间/学术平台/脑机接口/飞控系统/mocked-data/sessions/P01-20260908-141313-c95a5f33/candidate/decoder.json",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": []
+        }
+      ]
+    },
+    {
+      "name": "🌉 控制-飞控 桥接",
+      "locked": false,
+      "expanded": true,
+      "processes": [
+        {
+          "name": "🏑 直连飞控桥接",
+          "command": "cd MuJoCo_Sim/bci-control-sim\nuv run python ctrlsignal/bci_bridge/bridge.py \\\n  --task quadrotor_hover \\\n  --confidence-threshold 0.55 \\\n  --idle-margin 0.10",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": []
+        },
+        {
+          "name": "🎛️ 状态机飞控桥接",
+          "command": "cd DataLink-FrontEnd\nuv run datalink-frontend run \\\n  --config configs/bci_quadrotor_4class.yaml \\\n  --gui \\\n  --keyboard \\\n  --no-developer-mode",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Control",
+              "type": "BCIControlSignal",
+              "evidence": [
+                {
+                  "file": "target contract",
+                  "line": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "🚁 无人机外设",
+      "locked": false,
+      "expanded": true,
+      "processes": [
+        {
+          "name": "🔮 仿真环境-无人机",
+          "command": "cd MuJoCo_Sim/bci-control-sim\nuv run mjpython -m bci_control_sim.cli run quadrotor_hover --viewer \\\n  --scene mission",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Fence Estimate",
+              "type": "BCIControlFenceEstimate",
+              "evidence": [
+                {
+                  "file": "ctrlsignal/keyboard/fence_estimate.py",
+                  "line": 243
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Runtime",
+              "type": "BCIControlRuntime",
+              "evidence": [
+                {
+                  "file": "ctrlsignal/keyboard/runtime.py",
+                  "line": 100
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor TT State",
+              "type": "RoboMasterTTState",
+              "evidence": [
+                {
+                  "file": "ctrlsignal/keyboard/telemetry.py",
+                  "line": 71
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "🛟 仿真桥接-地垫围栏",
+          "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 127.0.0.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9001 \\\n  --tello-state-port 8891 \\\n  --tello-video-port 11112 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --fence floor-pad \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Fence Estimate",
+              "type": "BCIControlFenceEstimate",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/fence_estimate_lsl.py",
+                  "line": 17
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Runtime",
+              "type": "BCIControlRuntime",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/runtime_lsl.py",
+                  "line": 22
+                }
+              ]
+            },
+            {
+              "name": "BCI Drone Safety",
+              "type": "BCIControlSafety",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/safety_lsl.py",
+                  "line": 14
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Visual",
+              "type": "BCIControlVisualStream",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/visual_stream_lsl.py",
+                  "line": 43
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor TT State",
+              "type": "RoboMasterTTState",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/telemetry_lsl.py",
+                  "line": 14
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "🪁 仿真桥接-视觉围栏",
+          "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 127.0.0.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9001 \\\n  --tello-state-port 8891 \\\n  --tello-video-port 11112 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --visual-localization --mission-pad \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Fence Estimate",
+              "type": "BCIControlFenceEstimate",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/fence_estimate_lsl.py",
+                  "line": 17
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Runtime",
+              "type": "BCIControlRuntime",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/runtime_lsl.py",
+                  "line": 22
+                }
+              ]
+            },
+            {
+              "name": "BCI Drone Safety",
+              "type": "BCIControlSafety",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/safety_lsl.py",
+                  "line": 14
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Visual",
+              "type": "BCIControlVisualStream",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/visual_stream_lsl.py",
+                  "line": 43
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor TT State",
+              "type": "RoboMasterTTState",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/telemetry_lsl.py",
+                  "line": 14
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "✳️ 真机桥接-地垫围栏",
+          "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 192.168.10.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9000 \\\n  --tello-state-port 8890 \\\n  --tello-video-port 11111 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --fence floor-pad \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Fence Estimate",
+              "type": "BCIControlFenceEstimate",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/fence_estimate_lsl.py",
+                  "line": 17
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Runtime",
+              "type": "BCIControlRuntime",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/runtime_lsl.py",
+                  "line": 22
+                }
+              ]
+            },
+            {
+              "name": "BCI Drone Safety",
+              "type": "BCIControlSafety",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/safety_lsl.py",
+                  "line": 14
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Visual",
+              "type": "BCIControlVisualStream",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/visual_stream_lsl.py",
+                  "line": 43
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor TT State",
+              "type": "RoboMasterTTState",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/telemetry_lsl.py",
+                  "line": 14
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "🌌 真机桥接-任务板围栏",
+          "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 192.168.10.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9000 \\\n  --tello-state-port 8890 \\\n  --tello-video-port 11111 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --mission-pad \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Fence Estimate",
+              "type": "BCIControlFenceEstimate",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/fence_estimate_lsl.py",
+                  "line": 17
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Runtime",
+              "type": "BCIControlRuntime",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/runtime_lsl.py",
+                  "line": 22
+                }
+              ]
+            },
+            {
+              "name": "BCI Drone Safety",
+              "type": "BCIControlSafety",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/safety_lsl.py",
+                  "line": 14
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Visual",
+              "type": "BCIControlVisualStream",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/visual_stream_lsl.py",
+                  "line": 43
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor TT State",
+              "type": "RoboMasterTTState",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/telemetry_lsl.py",
+                  "line": 14
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "🚁 真机桥接-视觉围栏",
+          "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 192.168.10.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9000 \\\n  --tello-state-port 8890 \\\n  --tello-video-port 11111 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --visual-localization --mission-pad \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Fence Estimate",
+              "type": "BCIControlFenceEstimate",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/fence_estimate_lsl.py",
+                  "line": 17
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Runtime",
+              "type": "BCIControlRuntime",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/runtime_lsl.py",
+                  "line": 22
+                }
+              ]
+            },
+            {
+              "name": "BCI Drone Safety",
+              "type": "BCIControlSafety",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/safety_lsl.py",
+                  "line": 14
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Visual",
+              "type": "BCIControlVisualStream",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/visual_stream_lsl.py",
+                  "line": 43
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor TT State",
+              "type": "RoboMasterTTState",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/telemetry_lsl.py",
+                  "line": 14
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "🔐 仿真桥接-无授权起飞",
+          "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 127.0.0.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9000 \\\n  --tello-state-port 8891 \\\n  --tello-video-port 11112 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --visual-localization --mission-pad \\\n  --publish-controller-state \\\n  --no-takeoff-key",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Fence Estimate",
+              "type": "BCIControlFenceEstimate",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/fence_estimate_lsl.py",
+                  "line": 16
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Runtime",
+              "type": "BCIControlRuntime",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/runtime_lsl.py",
+                  "line": 21
+                }
+              ]
+            },
+            {
+              "name": "BCI Drone Safety",
+              "type": "BCIControlSafety",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/safety_lsl.py",
+                  "line": 14
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Visual",
+              "type": "BCIControlVisualStream",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/visual_stream_lsl.py",
+                  "line": 43
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor TT State",
+              "type": "RoboMasterTTState",
+              "evidence": [
+                {
+                  "file": "src/bci_control_drone/telemetry_lsl.py",
+                  "line": 14
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "🕹️ 键盘遥控器-无人机",
+          "command": "cd MuJoCo_Sim/bci-control-sim\nenv -u PYTHONPATH uv run python ctrlsignal/keyboard/keyboard_lsl.py \\\n  --task quadrotor_hover",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Control",
+              "type": "BCIControlSignal",
+              "evidence": [
+                {
+                  "file": "task protocol",
+                  "line": 0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "🎲 键盘3D遥控器-无人机",
+          "command": "cd MuJoCo_Sim/bci-control-sim\nenv -u PYTHONPATH uv run python ctrlsignal/keyboard/keyboard_lsl.py \\\n  --task quadrotor_hover --3d",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Control",
+              "type": "BCIControlSignal",
+              "evidence": [
+                {
+                  "file": "task protocol",
+                  "line": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "🖲️ UWB定位",
+      "locked": false,
+      "expanded": true,
+      "processes": [
+        {
+          "name": "🖲️ 仿真环境-UWB定位",
+          "command": "cd MuJoCo_Sim/bci-control-sim\nuv run mjpython -m bci_control_sim.cli \\\n  run quadrotor_uwb --lsl --lsl-stream-type BCIControlSignalSimulation --viewer \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub \\\n  --uwb-layout-panel --scene 3D-sim",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Fence Estimate",
+              "type": "BCIControlFenceEstimate",
+              "evidence": [
+                {
+                  "file": "ctrlsignal/keyboard/fence_estimate.py",
+                  "line": 243
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor Runtime",
+              "type": "BCIControlRuntime",
+              "evidence": [
+                {
+                  "file": "ctrlsignal/keyboard/runtime.py",
+                  "line": 100
+                }
+              ]
+            },
+            {
+              "name": "BCI Quadrotor TT State",
+              "type": "RoboMasterTTState",
+              "evidence": [
+                {
+                  "file": "ctrlsignal/keyboard/telemetry.py",
+                  "line": 71
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "🕹️ 键盘遥控器-UWB定位",
+          "command": "cd MuJoCo_Sim/bci-control-sim\nenv -u PYTHONPATH uv run python ctrlsignal/keyboard/keyboard_lsl.py \\\n  --task quadrotor_uwb",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI Quadrotor Control",
+              "type": "BCIControlSignal",
+              "evidence": [
+                {
+                  "file": "task protocol",
+                  "line": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "🦾 机械臂",
+      "locked": false,
+      "expanded": true,
+      "processes": [
+        {
+          "name": "🦾 仿真环境-机械臂",
+          "command": "cd MuJoCo_Sim/bci-control-sim\nenv -u PYTHONPATH uv run mjpython \\\n  -m bci_control_sim.cli run arm_reach --viewer \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": []
+        },
+        {
+          "name": "🕹键盘遥控器-机械臂️",
+          "command": "cd MuJoCo_Sim/bci-control-sim\nenv -u PYTHONPATH uv run python ctrlsignal/keyboard/keyboard_lsl.py \\\n  --task arm_reach",
+          "enabled": true,
+          "gui_mode": "auto",
+          "lsl_streams": [
+            {
+              "name": "BCI MiniCobo Control",
+              "type": "BCIControlSignal",
+              "evidence": [
+                {
+                  "file": "task protocol",
+                  "line": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "无分组",
+      "locked": true,
+      "expanded": false,
+      "processes": []
+    }
+  ]
+}
