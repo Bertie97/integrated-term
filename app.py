@@ -1338,12 +1338,11 @@ class App(tk.Tk):
             marker = "▾" if group.expanded else "▸"
             group_iid = tree.insert("", "end", text=f"    {marker}  {self._group_name(group)}", values=("", self._t("running") if running else self._t("idle"), ""), open=group.expanded, tags=("running" if running else "idle", "group"))
             self._floating_tree_map[group_iid] = group
-            if group.expanded:
-                for item in group.items:
-                    state = self._t("running") if item.running else (f"{self._t('exited')} {item.return_code}" if item.return_code is not None else self._t("idle"))
-                    pid = str(item.process.pid) if item.process and item.running else "-"
-                    iid = tree.insert(group_iid, "end", text=self._item_name(item), values=({"auto": "◩", "show": "▣", "hide": "▢"}[item.gui_mode], state, pid), tags=("running" if item.running else "idle",))
-                    self._floating_tree_map[iid] = item
+            for item in group.items:
+                state = self._t("running") if item.running else (f"{self._t('exited')} {item.return_code}" if item.return_code is not None else self._t("idle"))
+                pid = str(item.process.pid) if item.process and item.running else "-"
+                iid = tree.insert(group_iid, "end", text=self._item_name(item), values=({"auto": "◩", "show": "▣", "hide": "▢"}[item.gui_mode], state, pid), tags=("running" if item.running else "idle",))
+                self._floating_tree_map[iid] = item
 
     def _item_gui_visible(self, item: ManagedProcess) -> bool:
         return self.window_controller.is_visible(item)
@@ -1364,17 +1363,25 @@ class App(tk.Tk):
     def _group_opened(self, _event=None):
         if self._refreshing_tree:
             return
-        self._set_group_expanded(True)
+        self._schedule_group_expanded_sync()
 
     def _group_closed(self, _event=None):
         if self._refreshing_tree:
             return
-        self._set_group_expanded(False)
+        self._schedule_group_expanded_sync()
 
-    def _set_group_expanded(self, expanded: bool):
+    def _schedule_group_expanded_sync(self):
         iid = self.tree.focus()
+        self.after_idle(lambda: self._sync_group_expanded_from_tree(iid))
+
+    def _sync_group_expanded_from_tree(self, iid: str):
+        if not iid or not self.tree.exists(iid):
+            return
         group = next((group for group in self.manager.groups if getattr(group, "_tree_id", None) == iid), None)
-        if group:
+        if group is not None:
+            expanded = bool(self.tree.item(iid, "open"))
+            if group.expanded == expanded:
+                return
             group.expanded = expanded
             self._save_config()
 
@@ -1525,13 +1532,12 @@ class App(tk.Tk):
                 marker = "▾" if group.expanded else "▸"
                 group_iid = self.tree.insert("", "end", text=f"    {marker}  {self._group_name(group)}", values=("", self._t("running") if running else self._t("idle"), ""), open=group.expanded, tags=("running" if running else "idle", "group"))
                 group._tree_id = group_iid
-                if group.expanded:
-                    for item in group.items:
-                        state = self._t("running") if item.running else (f"{self._t('exited')} {item.return_code}" if item.return_code is not None else self._t("idle"))
-                        pid = str(item.process.pid) if item.process and item.running else "-"
-                        gui_icon = {"auto": "◩", "show": "▣", "hide": "▢"}[item.gui_mode]
-                        iid = self.tree.insert(group_iid, "end", text=self._item_name(item), values=(gui_icon, state, pid), tags=("running" if item.running else "idle",))
-                        item._tree_id = iid
+                for item in group.items:
+                    state = self._t("running") if item.running else (f"{self._t('exited')} {item.return_code}" if item.return_code is not None else self._t("idle"))
+                    pid = str(item.process.pid) if item.process and item.running else "-"
+                    gui_icon = {"auto": "◩", "show": "▣", "hide": "▢"}[item.gui_mode]
+                    iid = self.tree.insert(group_iid, "end", text=self._item_name(item), values=(gui_icon, state, pid), tags=("running" if item.running else "idle",))
+                    item._tree_id = iid
             valid = [item for item in selected_items if item in self.manager.items]
             self.selected_items = valid
             valid_groups = [group for group in selected_groups if group in self.manager.groups]

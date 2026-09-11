@@ -272,6 +272,53 @@ class ProcessManagerTests(unittest.TestCase):
         app._group_closed()
         self.assertTrue(group.expanded)
 
+    def test_delayed_close_event_uses_current_tree_state(self):
+        group = type("Group", (), {"expanded": True, "_tree_id": "group"})()
+
+        class FakeTree:
+            def focus(self):
+                return "group"
+
+            def exists(self, iid):
+                return iid == "group"
+
+            def item(self, iid, option):
+                self.last_item = (iid, option)
+                return True
+
+        app = object.__new__(App)
+        app._refreshing_tree = False
+        app.tree = FakeTree()
+        app.manager = type("Manager", (), {"groups": [group]})()
+        app.after_idle = lambda callback: callback()
+        app._save_config = lambda: self.fail("unchanged expansion state must not be saved")
+
+        app._group_closed()
+
+        self.assertTrue(group.expanded)
+        self.assertEqual(app.tree.last_item, ("group", "open"))
+
+    def test_expansion_sync_ignores_deleted_tree_row(self):
+        group = type("Group", (), {"expanded": True, "_tree_id": "new-group"})()
+        tree = type(
+            "Tree",
+            (),
+            {
+                "focus": lambda self: "old-group",
+                "exists": lambda self, iid: False,
+            },
+        )()
+        app = object.__new__(App)
+        app._refreshing_tree = False
+        app.tree = tree
+        app.manager = type("Manager", (), {"groups": [group]})()
+        app.after_idle = lambda callback: callback()
+        app._save_config = lambda: self.fail("stale events must not be saved")
+
+        app._group_closed()
+
+        self.assertTrue(group.expanded)
+
     def test_window_visibility_state_is_per_process_pid(self):
         controller = WindowController(None)
         item = ManagedProcess(ProcessSpec("viewer", "echo"))

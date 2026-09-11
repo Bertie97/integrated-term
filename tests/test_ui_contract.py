@@ -88,6 +88,39 @@ class UiContractTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_collapsed_group_keeps_process_rows_in_tree_model(self):
+        spec = importlib.util.spec_from_file_location("integrated_term_tree_rows", APP)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        try:
+            root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(f"Tk display unavailable: {exc}")
+        root.withdraw()
+        try:
+            view = object.__new__(module.App)
+            view.lang = "zh"
+            view.tree = module.ttk.Treeview(root)
+            view.manager = module.ProcessManager(PROJECT_DIR, lambda *_args: None)
+            group = view.manager.add_group("collapsed")
+            group.expanded = False
+            view.manager.add(module.ProcessSpec("kept", "echo kept"), group)
+            view.selected = None
+            view.selected_items = []
+            view.selected_group = None
+            view.selected_groups = []
+            view._refreshing_tree = False
+            view._update_action_labels = lambda: None
+            view._refresh_process_list_window = lambda: None
+
+            view._refresh_tree()
+
+            self.assertFalse(bool(view.tree.item(group._tree_id, "open")))
+            self.assertEqual(len(view.tree.get_children(group._tree_id)), 1)
+        finally:
+            root.destroy()
+
     def test_pinned_list_window_has_topmost_lifecycle(self):
         self.assertIn("def _toggle_process_list_window", self.source)
         self.assertIn('window.attributes("-topmost", True)', self.source)
