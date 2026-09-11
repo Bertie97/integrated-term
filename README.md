@@ -27,6 +27,17 @@ Windows 命令块使用 `\\` 表示路径分隔符，多行命令使用 `^` 续�
 python3 app.py
 ```
 
+### macOS 打包
+
+macOS 使用 PyInstaller 生成原生 ARM64 `.app`，并同时生成便于分发的 ZIP：
+
+```bash
+PYTHON_BIN=/Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
+  packaging/macos/build_app.sh
+```
+
+输出位于 `dist/集成终端控制台.app` 和 `dist/集成终端控制台-macos-arm64.zip`。
+
 ### Linux 打包
 
 Linux 使用 PyInstaller `onedir` 打包，避免把 Tk、Font Awesome 资源和窗口控制工具隐藏在单文件临时目录中：
@@ -68,3 +79,7 @@ bash packaging/linux/build_app.sh
 - Linux：`$XDG_CONFIG_HOME/BCIControl/active_lsl_processes.json`，未设置时使用 `~/.config`
 
 配置内的代码证据路径统一保存为相对仓库路径和 `/` 分隔符，避免把一台机器的绝对路径带到另一台机器。
+
+### 进程名称语言
+
+进程配置支持 `name_zh` 和 `name_en` 两个名称字段。在哪种界面语言下编辑，就更新对应字段；切换界面语言会立即切换进程列表、终端状态等显示文本。当前语言字段为空时，自动继承另一语言字段，再回退到兼容旧配置的 `name` 字段。运行命令仍使用单一的 `command` 字段，不参与语言切换。

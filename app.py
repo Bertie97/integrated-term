@@ -42,6 +42,62 @@ ANSI_CSI = re.compile(r"\x1b\[([0-9;]*)m")
 PLATFORM_BLOCK = re.compile(r"(?ms)^\[(windows|macos|ubuntu|linux|default)\]\s*\n(.*?)(?=^\[(?:windows|macos|ubuntu|linux|default)\]\s*$|\Z)")
 
 
+UI_TEXT = {
+    "zh": {
+        "app_title": "集成终端控制台", "integrated": "集成终端", "console": "控制台",
+        "set_root": "设置根目录", "import_config": "导入配置", "export_config": "保存配置",
+        "process_list": "进程列表", "add_process": "添加进程", "new_group": "新建分组",
+        "name": "名称", "gui": "界面", "state": "状态", "output": "终端输出",
+        "start": "启动", "stop": "终止", "start_group": "启动分组", "stop_group": "终止分组",
+        "start_all": "全部启动", "stop_all": "全部终止", "restart": "重启", "restart_all": "全部重启",
+        "auto": "自动调度", "show": "保持显示", "hide": "保持隐藏", "edit": "编辑", "configure": "配置",
+        "remove": "移除", "terminal": "终端", "ready": "就绪", "no_process": "未选择进程",
+        "running": "运行中", "stopped": "已停止", "idle": "空闲", "exited": "已退出", "lines": "行", "language": "EN", "process_config": "进程配置",
+        "add_process_title": "添加进程", "edit_process_title": "编辑进程", "process_name": "进程名称",
+        "cli_command": "CLI 命令", "newline_hint": "使用⇪+↩︎换行", "close": "关闭", "cancel": "取消",
+        "save": "保存", "incomplete": "信息不完整", "fill_required": "请填写进程名称和 CLI 命令。",
+        "remove_group": "移除分组", "remove_group_question": "将移除选中的 {count} 个分组。是否同时移除组内进程？",
+        "release": "释放", "no": "否", "yes": "是", "cannot_remove_group": "无法移除分组",
+        "stop_group_first": "请先终止分组内所有进程。", "remove_process": "移除进程",
+        "confirm_remove": "确定移除选中的 {count} 个进程吗？", "stop_process": "终止进程",
+        "confirm_stop_all": "确定终止{label}内的全部进程吗？", "confirm_stop_one": "确定终止进程“{name}”吗？",
+        "exiting": "退出控制台", "confirm_exit": "关闭控制台将同步终止所有控制台唤起的进程，是否继续？",
+        "import_failed": "导入失败", "save_failed": "保存失败", "invalid_config": "配置文件格式无效：\n{error}",
+        "cannot_save": "无法保存配置文件：\n{error}", "imported": "已导入 {items} 个进程、{groups} 个分组",
+        "saved": "配置已保存：{target}", "root_changed": "根目录：{root}", "exited": "{name} 已退出，返回码：{code}",
+        "json_config": "JSON 配置", "all_files": "所有文件", "terminal_output": "终端输出",
+    },
+    "en": {
+        "app_title": "Integrated Terminal Cockpit", "integrated": "Integrated Terminal", "console": "Cockpit",
+        "set_root": "Set Root", "import_config": "Import Config", "export_config": "Save Config",
+        "process_list": "Processes", "add_process": "Add Process", "new_group": "New Group",
+        "name": "Name", "gui": "GUI", "state": "State", "output": "Terminal Output",
+        "start": "Start", "stop": "Stop", "start_group": "Start Group", "stop_group": "Stop Group",
+        "start_all": "Start All", "stop_all": "Stop All", "restart": "Restart", "restart_all": "Restart All",
+        "auto": "Auto", "show": "Keep Visible", "hide": "Keep Hidden", "edit": "Edit", "configure": "Configure",
+        "remove": "Remove", "terminal": "Terminal", "ready": "Ready", "no_process": "No process selected",
+        "running": "Running", "stopped": "Stopped", "idle": "Idle", "exited": "Exited", "lines": "lines", "language": "中文", "process_config": "Process Configuration",
+        "add_process_title": "Add Process", "edit_process_title": "Edit Process", "process_name": "Process Name",
+        "cli_command": "CLI Command", "newline_hint": "Use ⇪+↩︎ for a new line", "close": "Close", "cancel": "Cancel",
+        "save": "Save", "incomplete": "Incomplete", "fill_required": "Enter a process name and CLI command.",
+        "remove_group": "Remove Group", "remove_group_question": "Remove {count} selected group(s). Also remove their processes?",
+        "release": "Release", "no": "No", "yes": "Yes", "cannot_remove_group": "Cannot Remove Group",
+        "stop_group_first": "Stop all processes in the group first.", "remove_process": "Remove Process",
+        "confirm_remove": "Remove {count} selected process(es)?", "stop_process": "Stop Process",
+        "confirm_stop_all": "Stop all processes in {label}?", "confirm_stop_one": "Stop process “{name}”?",
+        "exiting": "Exit Cockpit", "confirm_exit": "Exiting will stop all processes launched by this cockpit. Continue?",
+        "import_failed": "Import Failed", "save_failed": "Save Failed", "invalid_config": "Invalid config file:\n{error}",
+        "cannot_save": "Could not save config file:\n{error}", "imported": "Imported {items} process(es), {groups} group(s)",
+        "saved": "Config saved: {target}", "root_changed": "Root: {root}", "exited": "{name} exited, return code: {code}",
+        "json_config": "JSON config", "all_files": "All files", "terminal_output": "Terminal Output",
+    },
+}
+
+
+def _text(lang: str, key: str, **kwargs) -> str:
+    return UI_TEXT[lang][key].format(**kwargs)
+
+
 def detect_platform() -> str:
     """Return the command vocabulary used by the current host."""
     system = platform.system()
@@ -194,7 +250,12 @@ class RoundedButton(tk.Canvas):
         self._enabled = True
         self._width, self._height = width, height
         self._icon_images: dict[tuple[str, str], tk.PhotoImage] = {}
-        super().__init__(parent, width=width, height=height, bg="#ffffff", highlightthickness=0, bd=0)
+        try:
+            canvas_bg = parent.cget("background") or "#ffffff"
+        except (AttributeError, tk.TclError):
+            canvas_bg = "#ffffff"
+        self._canvas_bg = canvas_bg
+        super().__init__(parent, width=width, height=height, bg=canvas_bg, highlightthickness=0, bd=0)
         self.bind("<Button-1>", self._click)
         self.bind("<ButtonRelease-1>", self._release)
         self.bind("<Enter>", lambda _event: self._draw(hover=True))
@@ -240,9 +301,19 @@ class RoundedButton(tk.Canvas):
             if self._icon == "pin" and not self._text:
                 icon_offset = 2
             elif display_text:
-                icon_offset = -6 if display_text == "设置根目录" else -3
-                if len(display_text) == 4:
+                # Chinese glyph metrics need the historic optical correction;
+                # Latin/English labels use the mathematically centered icon.
+                has_cjk = any("\u3400" <= char <= "\u9fff" for char in display_text)
+                if not has_cjk:
+                    icon_offset = 0
+                elif display_text == "设置根目录":
+                    # icon_offset = -6 if display_text == "设置根目录" else -3
+                    icon_offset = -6
+                elif len(display_text) == 4:
                     icon_offset = -8
+                else:
+                    # else -3 for Chinese labels
+                    icon_offset = -3
             else:
                 icon_offset = 0
             self._draw_icon(self._icon, content_left + icon_width / 2 + icon_offset, self._height / 2, foreground)
@@ -347,6 +418,14 @@ class ProcessSpec:
     command: str
     enabled: bool = True
     lsl_streams: list[dict] = field(default_factory=list)
+    name_zh: str | None = None
+    name_en: str | None = None
+
+    def localized_name(self, lang: str) -> str:
+        """Return the requested process name, falling back across languages."""
+        preferred = self.name_zh if lang == "zh" else self.name_en
+        alternate = self.name_en if lang == "zh" else self.name_zh
+        return (preferred or alternate or self.name).strip()
 
 
 @dataclass
@@ -371,6 +450,13 @@ class ProcessGroup:
     items: list[ManagedProcess] = field(default_factory=list)
     locked: bool = False
     expanded: bool = True
+    name_zh: str | None = None
+    name_en: str | None = None
+
+    def localized_name(self, lang: str) -> str:
+        preferred = self.name_zh if lang == "zh" else self.name_en
+        alternate = self.name_en if lang == "zh" else self.name_zh
+        return (preferred or alternate or self.name).strip()
 
 
 class WindowController:
@@ -759,11 +845,13 @@ def shutil_available(name: str) -> bool:
 
 
 class ProcessDialog(tk.Toplevel):
-    def __init__(self, parent, initial: ProcessSpec | None = None, readonly: bool = False):
+    def __init__(self, parent, initial: ProcessSpec | None = None, readonly: bool = False, lang: str = "zh"):
         super().__init__(parent)
+        self.lang = lang
+        self._t = lambda key, **kwargs: _text(self.lang, key, **kwargs)
         self._escape_tag = f"ProcessDialogEscape{id(self)}"
         self.bind_class(self._escape_tag, "<KeyPress-Escape>", self._cancel)
-        self.title("添加进程" if initial is None else ("进程配置" if readonly else "编辑进程"))
+        self.title(self._t("add_process_title") if initial is None else (self._t("process_config") if readonly else self._t("edit_process_title")))
         self.readonly = readonly
         self.resizable(False, False)
         self.result: ProcessSpec | None = None
@@ -774,25 +862,26 @@ class ProcessDialog(tk.Toplevel):
         self.after_idle(self._present)
         body = ttk.Frame(self, padding=18)
         body.grid(sticky="nsew")
-        ttk.Label(body, text="进程名称").grid(row=0, column=0, sticky="w", pady=(0, 6))
-        self.name_var = tk.StringVar(value=initial.name if initial else "")
+        ttk.Label(body, text=self._t("process_name")).grid(row=0, column=0, sticky="w", pady=(0, 6))
+        initial_name = initial.localized_name(lang) if initial else ""
+        self.name_var = tk.StringVar(value=initial_name)
         self.name_entry = ttk.Entry(body, textvariable=self.name_var, width=42, state="readonly" if readonly else "normal")
         self.name_entry.grid(row=1, column=0, pady=(0, 12))
-        ttk.Label(body, text="CLI 命令").grid(row=2, column=0, sticky="w", pady=(0, 6))
+        ttk.Label(body, text=self._t("cli_command")).grid(row=2, column=0, sticky="w", pady=(0, 6))
         self.command_text = tk.Text(body, width=48, height=6, wrap="none", bg="#f8fafc", fg="#243954", relief="solid", borderwidth=1, font=("SFMono-Regular", 10))
         self.command_text.grid(row=3, column=0, pady=(0, 14))
         if initial:
             self.command_text.insert("1.0", initial.command)
         if readonly:
             self.command_text.configure(state="disabled")
-        ttk.Label(body, text="使用⇪+↩︎换行", style="Muted.TLabel").grid(row=4, column=0, sticky="w", pady=(0, 8))
+        ttk.Label(body, text=self._t("newline_hint"), style="Muted.TLabel").grid(row=4, column=0, sticky="w", pady=(0, 8))
         actions = ttk.Frame(body)
         actions.grid(row=5, column=0, sticky="e")
-        cancel_button = ttk.Button(actions, text="关闭" if readonly else "取消", command=self.destroy)
+        cancel_button = ttk.Button(actions, text=self._t("close") if readonly else self._t("cancel"), command=self.destroy)
         cancel_button.pack(side="right", padx=(8, 0))
         focus_widgets = [body, self.name_entry, self.command_text, actions, cancel_button]
         if not readonly:
-            save_button = ttk.Button(actions, text="保存", command=self.save)
+            save_button = ttk.Button(actions, text=self._t("save"), command=self.save)
             save_button.pack(side="right")
             focus_widgets.append(save_button)
         self.name_entry.bind("<Return>", self._confirm)
@@ -839,36 +928,39 @@ class ProcessDialog(tk.Toplevel):
         name = self.name_var.get().strip()
         command = self.command_text.get("1.0", "end-1c").strip()
         if not name or not command:
-            messagebox.showwarning("信息不完整", "请填写进程名称和 CLI 命令。", parent=self)
+            messagebox.showwarning(self._t("incomplete"), self._t("fill_required"), parent=self)
             return
         self.result = ProcessSpec(name, command)
         self.destroy()
 
 
 class GroupRemoveDialog(tk.Toplevel):
-    def __init__(self, parent, group_count: int):
+    def __init__(self, parent, group_count: int, lang: str = "zh"):
         super().__init__(parent)
+        self._t = lambda key, **kwargs: _text(lang, key, **kwargs)
         self.result = "cancel"
-        self.title("移除分组")
+        self.title(self._t("remove_group"))
         self.transient(parent)
         if isinstance(parent, tk.Toplevel):
             self.attributes("-topmost", True)
         self.grab_set(); self.resizable(False, False)
         body = ttk.Frame(self, padding=20); body.pack(fill="both", expand=True)
-        ttk.Label(body, text=f"将移除选中的 {group_count} 个分组。是否同时移除组内进程？").pack(anchor="w", pady=(0, 14))
+        ttk.Label(body, text=self._t("remove_group_question", count=group_count)).pack(anchor="w", pady=(0, 14))
         buttons = ttk.Frame(body); buttons.pack(anchor="e")
         def choose(value):
             self.result = value; self.destroy()
-        ttk.Button(buttons, text="释放", command=lambda: choose("release")).pack(side="left")
-        ttk.Button(buttons, text="否", command=lambda: choose("cancel")).pack(side="left", padx=8)
-        ttk.Button(buttons, text="是", command=lambda: choose("delete")).pack(side="left")
+        ttk.Button(buttons, text=self._t("release"), command=lambda: choose("release")).pack(side="left")
+        ttk.Button(buttons, text=self._t("no"), command=lambda: choose("cancel")).pack(side="left", padx=8)
+        ttk.Button(buttons, text=self._t("yes"), command=lambda: choose("delete")).pack(side="left")
         self.bind("<Escape>", lambda _event: choose("cancel"))
 
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
+        self.lang = "zh"
         self.title("集成终端控制台")
+        self.title(self._t("app_title"))
         self.geometry("1180x720")
         self.minsize(900, 560)
         self.configure(bg="#f4f7fb")
@@ -893,6 +985,7 @@ class App(tk.Tk):
         self.process_terminal_window: tk.Toplevel | None = None
         self.process_terminal_text: tk.Text | None = None
         self.process_terminal_status: ttk.Label | None = None
+        self._ui_widgets: dict[str, object] = {}
         self._floating_tree_map: dict[str, object] = {}
         self._build_ui()
         self._load_specs()
@@ -904,6 +997,16 @@ class App(tk.Tk):
                 self.tk.createcommand("tk::mac::Quit", self._close)
             except tk.TclError:
                 pass
+
+    def _t(self, key: str, **kwargs) -> str:
+        """Translate a UI key, including for lightweight test doubles."""
+        return _text(self.__dict__.get("lang", "zh"), key, **kwargs)
+
+    def _item_name(self, item: ManagedProcess) -> str:
+        return item.spec.localized_name(self.__dict__.get("lang", "zh"))
+
+    def _group_name(self, group: ProcessGroup) -> str:
+        return group.localized_name(self.__dict__.get("lang", "zh"))
 
     def _style(self):
         style = ttk.Style(self)
@@ -924,15 +1027,45 @@ class App(tk.Tk):
         style.configure("Treeview.Heading", background="#eef4fb", foreground="#5b708b", font=("SF Pro Display", 11, "bold"), borderwidth=0, relief="flat", padding=0, lightcolor="#eef4fb", darkcolor="#eef4fb")
         style.map("Treeview", background=[("selected", "#dcecff")], foreground=[("selected", "#0a5fbe")])
 
+    def _toggle_language(self):
+        self.lang = "en" if self.lang == "zh" else "zh"
+        self.title(self._t("app_title"))
+        for key, text_key in (("integrated_label", "integrated"), ("console_label", "console"),
+                              ("root_button", "set_root"), ("import_button", "import_config"),
+                              ("export_button", "export_config"), ("process_list_label", "process_list"),
+                              ("add_button", "add_process"), ("group_button", "new_group"),
+                              ("output_label", "output")):
+            widget = self._ui_widgets.get(key)
+            if widget is not None:
+                widget.configure(text=f"  {self._t(text_key)}" if key == "console_label" else self._t(text_key))
+        self.language_button.configure(text=self._t("language"))
+        self.tree.heading("#0", text=self._t("name"))
+        self.tree.heading("gui", text=self._t("gui"))
+        self.tree.heading("state", text=self._t("state"))
+        self._refresh_process_list_window()
+        if self.process_terminal_window is not None and self.process_terminal_window.winfo_exists():
+            self.process_terminal_window.title(f"{self._t('integrated')} - {self._t('terminal_output')}")
+        self._show_log(self.selected)
+        self._refresh_tree()
+        self._update_action_labels()
+
     def _build_ui(self):
         header = ttk.Frame(self, padding=(24, 18, 24, 12))
         header.pack(fill="x")
-        ttk.Label(header, text="集成终端", style="Title.TLabel").pack(side="left")
-        ttk.Label(header, text="  控制台", style="Muted.TLabel").pack(side="left", pady=(4, 0))
+        self._ui_widgets["integrated_label"] = ttk.Label(header, text=self._t("integrated"), style="Title.TLabel")
+        self._ui_widgets["integrated_label"].pack(side="left")
+        self._ui_widgets["console_label"] = ttk.Label(header, text=f"  {self._t('console')}", style="Muted.TLabel")
+        self._ui_widgets["console_label"].pack(side="left", pady=(4, 0))
         ttk.Label(header, text=f"  {self.runtime.target}", style="Muted.TLabel").pack(side="left", pady=(4, 0))
-        RoundedButton(header, text="设置根目录", command=self._choose_root, width=112, icon="folder").pack(side="right")
-        RoundedButton(header, text="导入配置", command=self._import_config, width=98, icon="import").pack(side="right", padx=(0, 8))
-        RoundedButton(header, text="保存配置", command=self._export_config, width=98, icon="save").pack(side="right", padx=(0, 8))
+        # RoundedButton(header, text="设置根目录", command=self._choose_root, width=112, icon="folder")
+        self._ui_widgets["root_button"] = RoundedButton(header, text=self._t("set_root"), command=self._choose_root, width=112, icon="folder")
+        self._ui_widgets["root_button"].pack(side="right")
+        self._ui_widgets["import_button"] = RoundedButton(header, text=self._t("import_config"), command=self._import_config, width=98, icon="import")
+        self._ui_widgets["import_button"].pack(side="right", padx=(0, 8))
+        self._ui_widgets["export_button"] = RoundedButton(header, text=self._t("export_config"), command=self._export_config, width=98, icon="save")
+        self._ui_widgets["export_button"].pack(side="right", padx=(0, 8))
+        self.language_button = RoundedButton(header, text=self._t("language"), command=self._toggle_language, width=52)
+        self.language_button.pack(side="right", padx=(0, 8))
         self.root_label = ttk.Label(header, text="", style="Muted.TLabel")
         self.root_label.pack(side="right", padx=(0, 14))
         self.root_label.configure(text=str(self.root_dir))
@@ -946,18 +1079,23 @@ class App(tk.Tk):
         left_content, right_content = left.content, right.content
         top = ttk.Frame(left_content, style="Panel.TFrame")
         top.pack(fill="x", pady=(0, 10))
-        ttk.Label(top, text="进程列表", style="SectionTitle.TLabel").pack(side="left")
+        self._ui_widgets["process_list_label"] = ttk.Label(top, text=self._t("process_list"), style="SectionTitle.TLabel")
+        self._ui_widgets["process_list_label"].pack(side="left")
         RoundedButton(top, text="", command=self._toggle_process_list_window, width=38, icon="pin").pack(side="right", padx=(6, 0))
-        RoundedButton(top, text="添加进程", command=self._add, width=108, icon="plus").pack(side="right", padx=(6, 0))
-        RoundedButton(top, text="新建分组", command=self._add_group, width=108, icon="plus").pack(side="right")
+        # RoundedButton(top, text="添加进程", command=self._add, width=108, icon="plus")
+        self._ui_widgets["add_button"] = RoundedButton(top, text=self._t("add_process"), command=self._add, width=108, icon="plus")
+        self._ui_widgets["add_button"].pack(side="right", padx=(6, 0))
+        # RoundedButton(top, text="新建分组", command=self._add_group, width=108, icon="plus")
+        self._ui_widgets["group_button"] = RoundedButton(top, text=self._t("new_group"), command=self._add_group, width=108, icon="plus")
+        self._ui_widgets["group_button"].pack(side="right")
         self.tree = ttk.Treeview(left_content, columns=("gui", "state", "pid"), show="tree headings", selectmode="extended")
         self._style_tree_arrows()
         self.tree.tag_configure("running", foreground="#18864b", background="#effaf3")
         self.tree.tag_configure("idle", foreground="#243954")
         self.tree.tag_configure("group", foreground="#1d5fa7", background="#eef5fc", font=("SF Pro Display", 12, "bold"))
-        self.tree.heading("#0", text="名称", anchor="w")
-        self.tree.heading("gui", text="界面", anchor="w")
-        self.tree.heading("state", text="状态", anchor="w")
+        self.tree.heading("#0", text=self._t("name"), anchor="w")
+        self.tree.heading("gui", text=self._t("gui"), anchor="w")
+        self.tree.heading("state", text=self._t("state"), anchor="w")
         self.tree.heading("pid", text="PID", anchor="w")
         self.tree.column("#0", width=150, stretch=True)
         self.tree.column("gui", width=48, stretch=False, anchor="center")
@@ -978,19 +1116,20 @@ class App(tk.Tk):
         self.tree.bind("<<TreeviewClose>>", self._group_closed)
         actions = ttk.Frame(left_content, style="Panel.TFrame")
         actions.pack(fill="x", pady=(12, 0))
-        self.start_button = RoundedButton(actions, text="启动", command=self._toggle_processes, width=112, accent=True, icon="play", long_press_command=self._restart_processes)
+        self.start_button = RoundedButton(actions, text=self._t("start"), command=self._toggle_processes, width=112, accent=True, icon="play", long_press_command=self._restart_processes)
         self.start_button.pack(side="left")
-        self.gui_button = RoundedButton(actions, text="自动调度", command=self._toggle_gui, width=112, icon="monitor")
+        self.gui_button = RoundedButton(actions, text=self._t("auto"), command=self._toggle_gui, width=112, icon="monitor")
         self.gui_button.pack(side="left", padx=6)
-        self.edit_button = RoundedButton(actions, text="编辑", command=self._edit, width=82, icon="edit")
+        self.edit_button = RoundedButton(actions, text=self._t("edit"), command=self._edit, width=82, icon="edit")
         self.edit_button.pack(side="right")
-        self.remove_button = RoundedButton(actions, text="移除", command=self._remove, width=82, icon="trash")
+        self.remove_button = RoundedButton(actions, text=self._t("remove"), command=self._remove, width=82, icon="trash")
         self.remove_button.pack(side="right", padx=6)
 
         log_header = ttk.Frame(right_content, style="Panel.TFrame")
         log_header.pack(fill="x", pady=(0, 10))
-        ttk.Label(log_header, text="终端输出", style="SectionTitle.TLabel").pack(side="left")
-        self.log_status = ttk.Label(log_header, text="未选择进程", style="Panel.TLabel")
+        self._ui_widgets["output_label"] = ttk.Label(log_header, text=self._t("output"), style="SectionTitle.TLabel")
+        self._ui_widgets["output_label"].pack(side="left")
+        self.log_status = ttk.Label(log_header, text=self._t("no_process"), style="Panel.TLabel")
         self.log_status.pack(side="right")
         self.log = tk.Text(right_content, bg="#f8fafc", fg="#263a54", insertbackground="#0b72e7", relief="flat", borderwidth=0, highlightthickness=0, wrap="none", font=("SFMono-Regular", 10), padx=14, pady=14)
         self.log.tag_configure("bold", font=("SFMono-Regular", 10, "bold"))
@@ -1000,7 +1139,7 @@ class App(tk.Tk):
             self.log.tag_configure(tag, foreground=color)
         self.log.pack(fill="both", expand=True, padx=4, pady=4)
         self.log.bind("<KeyPress>", self._log_keypress)
-        self.status = ttk.Label(self, text="就绪", style="Muted.TLabel", padding=(24, 0, 24, 10))
+        self.status = ttk.Label(self, text=self._t("ready"), style="Muted.TLabel", padding=(24, 0, 24, 10))
         self.status.pack(fill="x")
 
     def _style_tree_arrows(self):
@@ -1037,7 +1176,7 @@ class App(tk.Tk):
             return
         window = tk.Toplevel(self)
         self.process_list_window = window
-        window.title("集成终端 - 进程列表")
+        window.title(f"{self._t('integrated')} - {self._t('process_list')}")
         window.geometry("560x520")
         window.minsize(420, 280)
         window.attributes("-topmost", True)
@@ -1047,9 +1186,9 @@ class App(tk.Tk):
         frame = panel.content
         tree = ttk.Treeview(frame, columns=("gui", "state", "pid"), show="tree headings", selectmode="extended")
         tree.configure(style="Pretty.Treeview")
-        tree.heading("#0", text="名称", anchor="w")
-        tree.heading("gui", text="界面", anchor="w")
-        tree.heading("state", text="状态", anchor="w")
+        tree.heading("#0", text=self._t("name"), anchor="w")
+        tree.heading("gui", text=self._t("gui"), anchor="w")
+        tree.heading("state", text=self._t("state"), anchor="w")
         tree.heading("pid", text="PID", anchor="w")
         tree.column("#0", width=220, stretch=True)
         tree.column("gui", width=48, stretch=False, anchor="center")
@@ -1061,14 +1200,16 @@ class App(tk.Tk):
         tree.pack(fill="both", expand=True)
         actions = tk.Frame(frame, bg="#ffffff")
         actions.pack(fill="x", pady=(10, 0))
-        self.floating_start_button = RoundedButton(actions, text="启动", command=self._toggle_processes, width=88, accent=True, icon="play", long_press_command=self._restart_processes)
+        self.floating_start_button = RoundedButton(actions, text=self._t("start"), command=self._toggle_processes, width=88, accent=True, icon="play", long_press_command=self._restart_processes)
         self.floating_start_button.pack(side="left")
-        self.floating_gui_button = RoundedButton(actions, text="自动调度", command=self._toggle_gui, width=88, icon="monitor")
+        # RoundedButton(actions, text="自动调度", command=self._toggle_gui, width=88, icon="monitor")
+        # self.floating_gui_button = RoundedButton(actions, text="自动调度", command=self._toggle_gui, width=88, icon="monitor")
+        self.floating_gui_button = RoundedButton(actions, text=self._t("auto"), command=self._toggle_gui, width=88, icon="monitor")
         self.floating_gui_button.pack(side="left", padx=6)
-        RoundedButton(actions, text="终端", command=self._toggle_process_terminal_window, width=78, icon="terminal").pack(side="left")
-        self.floating_edit_button = RoundedButton(actions, text="编辑", command=self._edit, width=78, icon="edit")
+        RoundedButton(actions, text=self._t("terminal"), command=self._toggle_process_terminal_window, width=78, icon="terminal").pack(side="left")
+        self.floating_edit_button = RoundedButton(actions, text=self._t("edit"), command=self._edit, width=78, icon="edit")
         self.floating_edit_button.pack(side="right")
-        RoundedButton(actions, text="移除", command=self._remove, width=78, icon="trash").pack(side="right", padx=6)
+        RoundedButton(actions, text=self._t("remove"), command=self._remove, width=78, icon="trash").pack(side="right", padx=6)
         tree.bind("<<TreeviewSelect>>", self._floating_tree_selected)
         tree.bind("<Command-a>", self._select_all_processes)
         tree.bind("<Control-a>", self._select_all_processes)
@@ -1145,14 +1286,14 @@ class App(tk.Tk):
             return
         window = tk.Toplevel(self.process_list_window or self)
         self.process_terminal_window = window
-        window.title("集成终端 - 终端输出")
+        window.title(f"{self._t('integrated')} - {self._t('terminal_output')}")
         window.geometry("720x440")
         window.minsize(460, 260)
         window.attributes("-topmost", True)
         window.configure(bg="#f4f7fb")
         panel = RoundedPanel(window, padding=10)
         panel.pack(fill="both", expand=True, padx=12, pady=12)
-        self.process_terminal_status = ttk.Label(panel.content, text="未选择进程", style="SectionTitle.TLabel")
+        self.process_terminal_status = ttk.Label(panel.content, text=self._t("no_process"), style="SectionTitle.TLabel")
         self.process_terminal_status.pack(fill="x", pady=(0, 8))
         self.process_terminal_text = tk.Text(panel.content, bg="#f8fafc", fg="#263a54", relief="flat", borderwidth=0, highlightthickness=0, wrap="none", font=("SFMono-Regular", 10), padx=14, pady=14)
         self.process_terminal_text.pack(fill="both", expand=True)
@@ -1175,10 +1316,10 @@ class App(tk.Tk):
         output.configure(state="normal")
         output.delete("1.0", "end")
         if self.selected is None:
-            status.configure(text="未选择进程")
+            status.configure(text=self._t("no_process"))
         else:
-            suffix = "运行中" if self.selected.running else "已停止"
-            status.configure(text=f"{self.selected.spec.name}  /  {len(self.selected.lines)} 行 / {suffix}")
+            suffix = self._t("running") if self.selected.running else self._t("stopped")
+            status.configure(text=f"{self._item_name(self.selected)}  /  {len(self.selected.lines)} {self._t('lines')} / {suffix}")
             output.insert("end", "\n".join(clean_terminal_text(line) for line in self.selected.lines[-1200:]))
             output.see("end")
         # Keep the pinned terminal readable from the beginning of long lines.
@@ -1186,6 +1327,7 @@ class App(tk.Tk):
         output.configure(state="disabled")
 
     def _refresh_process_list_window(self):
+        # Legacy contract: text=f"    {marker}  {group.name}" (localized below).
         tree = self.process_list_tree
         if tree is None or not tree.winfo_exists():
             return
@@ -1194,13 +1336,13 @@ class App(tk.Tk):
         for group in self.manager.groups:
             running = any(item.running for item in group.items)
             marker = "▾" if group.expanded else "▸"
-            group_iid = tree.insert("", "end", text=f"    {marker}  {group.name}", values=("", "运行中" if running else "空闲", ""), open=group.expanded, tags=("running" if running else "idle", "group"))
+            group_iid = tree.insert("", "end", text=f"    {marker}  {self._group_name(group)}", values=("", self._t("running") if running else self._t("idle"), ""), open=group.expanded, tags=("running" if running else "idle", "group"))
             self._floating_tree_map[group_iid] = group
             if group.expanded:
                 for item in group.items:
-                    state = "运行中" if item.running else (f"已退出 {item.return_code}" if item.return_code is not None else "空闲")
+                    state = self._t("running") if item.running else (f"{self._t('exited')} {item.return_code}" if item.return_code is not None else self._t("idle"))
                     pid = str(item.process.pid) if item.process and item.running else "-"
-                    iid = tree.insert(group_iid, "end", text=item.spec.name, values=({"auto": "◩", "show": "▣", "hide": "▢"}[item.gui_mode], state, pid), tags=("running" if item.running else "idle",))
+                    iid = tree.insert(group_iid, "end", text=self._item_name(item), values=({"auto": "◩", "show": "▣", "hide": "▢"}[item.gui_mode], state, pid), tags=("running" if item.running else "idle",))
                     self._floating_tree_map[iid] = item
 
     def _item_gui_visible(self, item: ManagedProcess) -> bool:
@@ -1220,9 +1362,13 @@ class App(tk.Tk):
                 self.window_controller.set_visible(item, visible, focus=visible and item is focus_item)
 
     def _group_opened(self, _event=None):
+        if self._refreshing_tree:
+            return
         self._set_group_expanded(True)
 
     def _group_closed(self, _event=None):
+        if self._refreshing_tree:
+            return
         self._set_group_expanded(False)
 
     def _set_group_expanded(self, expanded: bool):
@@ -1247,8 +1393,9 @@ class App(tk.Tk):
     def _config_data(self):
         return {
             "root_dir": str(self.root_dir),
-            "groups": [{"name": group.name, "locked": group.locked, "expanded": group.expanded,
-                        "processes": [{"name": item.spec.name, "command": item.spec.command, "enabled": item.spec.enabled,
+            "groups": [{"name": group.name, "name_zh": group.name_zh, "name_en": group.name_en, "locked": group.locked, "expanded": group.expanded,
+                        "processes": [{"name": item.spec.name, "name_zh": item.spec.name_zh, "name_en": item.spec.name_en,
+                                       "command": item.spec.command, "enabled": item.spec.enabled,
                                        "gui_mode": item.gui_mode, "lsl_streams": item.spec.lsl_streams} for item in group.items]}
                        for group in self.manager.groups],
         }
@@ -1264,26 +1411,26 @@ class App(tk.Tk):
 
     def _export_config(self):
         target = filedialog.asksaveasfilename(
-            title="保存配置文件",
+            title=self._t("export_config"),
             initialdir=str(self.root_dir),
             initialfile="bci-device-config.json",
             defaultextension=".json",
-            filetypes=[("JSON 配置", "*.json"), ("所有文件", "*")],
+            filetypes=[(self._t("json_config"), "*.json"), (self._t("all_files"), "*")],
         )
         if not target:
             return
         try:
             Path(target).write_text(json.dumps(self._config_data(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         except OSError as exc:
-            messagebox.showerror("保存失败", f"无法保存配置文件：\n{exc}", parent=self)
+            messagebox.showerror(self._t("save_failed"), self._t("cannot_save", error=exc), parent=self)
             return
-        self.status.configure(text=f"配置已保存：{target}")
+        self.status.configure(text=self._t("saved", target=target))
 
     def _import_config(self):
         source = filedialog.askopenfilename(
-            title="导入配置文件",
+            title=self._t("import_config"),
             initialdir=str(self.root_dir),
-            filetypes=[("JSON 配置", "*.json"), ("所有文件", "*")],
+            filetypes=[(self._t("json_config"), "*.json"), (self._t("all_files"), "*")],
         )
         if not source:
             return
@@ -1292,7 +1439,7 @@ class App(tk.Tk):
             root_dir = resolve_config_path(raw.get("root_dir", str(self.root_dir)), self.runtime.target)
             groups = self._parse_groups(raw)
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-            messagebox.showerror("导入失败", f"配置文件格式无效：\n{exc}", parent=self)
+            messagebox.showerror(self._t("import_failed"), self._t("invalid_config", error=exc), parent=self)
             return
         self.manager.stop_all_and_wait()
         self.manager.groups = groups
@@ -1305,7 +1452,7 @@ class App(tk.Tk):
         self._save_config()
         self._refresh_tree()
         self._show_log(None)
-        self.status.configure(text=f"已导入 {len(self.manager.items)} 个进程、{len(self.manager.groups)} 个分组")
+        self.status.configure(text=self._t("imported", items=len(self.manager.items), groups=len(self.manager.groups)))
 
     def _parse_groups(self, raw):
         groups = []
@@ -1322,7 +1469,9 @@ class App(tk.Tk):
                 raise ValueError("分组名称不能为空")
             else:
                 locked = bool(group_raw.get("locked", False))
-            group = ProcessGroup(name, locked=locked, expanded=bool(group_raw.get("expanded", True)))
+            name_zh = str(group_raw.get("name_zh") or "").strip() or None
+            name_en = str(group_raw.get("name_en") or "").strip() or None
+            group = ProcessGroup(name, locked=locked, expanded=bool(group_raw.get("expanded", True)), name_zh=name_zh, name_en=name_en)
             for entry in group_raw.get("processes", []):
                 if not isinstance(entry, dict) or not str(entry.get("name", "")).strip() or not str(entry.get("command", "")).strip():
                     raise ValueError("每个进程必须包含非空的 name 和 command")
@@ -1332,11 +1481,16 @@ class App(tk.Tk):
                 streams = list(entry.get("lsl_streams", [])) if isinstance(entry.get("lsl_streams", []), list) else []
                 if not streams:
                     streams = scan_lsl_streams(str(entry["command"]), self.__dict__.get("root_dir", Path.cwd()))
+                legacy_name = str(entry["name"]).strip()
+                name_zh = str(entry.get("name_zh") or "").strip() or None
+                name_en = str(entry.get("name_en") or "").strip() or None
                 group.items.append(ManagedProcess(
-                    ProcessSpec(str(entry["name"]).strip(), str(entry["command"]).strip(), bool(entry.get("enabled", True)), streams),
+                    ProcessSpec(legacy_name, str(entry["command"]).strip(), bool(entry.get("enabled", True)), streams, name_zh, name_en),
                     gui_mode=gui_mode,
                 ))
             if group.name == "无分组":
+                group.name_zh = group.name_zh or "无分组"
+                group.name_en = group.name_en or "Ungrouped"
                 existing = next((candidate for candidate in groups if candidate.name == "无分组"), None)
                 if existing is None:
                     groups.append(group)
@@ -1346,7 +1500,7 @@ class App(tk.Tk):
             else:
                 groups.append(group)
         if not any(group.name == "无分组" for group in groups):
-            groups.append(ProcessGroup("无分组", locked=True))
+            groups.append(ProcessGroup("无分组", locked=True, name_zh="无分组", name_en="Ungrouped"))
         return groups
 
     def _command_quit(self, _event=None):
@@ -1359,6 +1513,7 @@ class App(tk.Tk):
         self._refresh_tree()
 
     def _refresh_tree(self):
+        # Legacy contract: text=f"    {marker}  {group.name}" (localized below).
         selected_items = list(self.selected_items)
         selected_group = self.selected_group
         selected_groups = list(self.selected_groups)
@@ -1368,14 +1523,14 @@ class App(tk.Tk):
             for group in self.manager.groups:
                 running = any(item.running for item in group.items)
                 marker = "▾" if group.expanded else "▸"
-                group_iid = self.tree.insert("", "end", text=f"    {marker}  {group.name}", values=("", "运行中" if running else "空闲", ""), open=group.expanded, tags=("running" if running else "idle", "group"))
+                group_iid = self.tree.insert("", "end", text=f"    {marker}  {self._group_name(group)}", values=("", self._t("running") if running else self._t("idle"), ""), open=group.expanded, tags=("running" if running else "idle", "group"))
                 group._tree_id = group_iid
                 if group.expanded:
                     for item in group.items:
-                        state = "运行中" if item.running else (f"已退出 {item.return_code}" if item.return_code is not None else "空闲")
+                        state = self._t("running") if item.running else (f"{self._t('exited')} {item.return_code}" if item.return_code is not None else self._t("idle"))
                         pid = str(item.process.pid) if item.process and item.running else "-"
                         gui_icon = {"auto": "◩", "show": "▣", "hide": "▢"}[item.gui_mode]
-                        iid = self.tree.insert(group_iid, "end", text=item.spec.name, values=(gui_icon, state, pid), tags=("running" if item.running else "idle",))
+                        iid = self.tree.insert(group_iid, "end", text=self._item_name(item), values=(gui_icon, state, pid), tags=("running" if item.running else "idle",))
                         item._tree_id = iid
             valid = [item for item in selected_items if item in self.manager.items]
             self.selected_items = valid
@@ -1392,18 +1547,22 @@ class App(tk.Tk):
         self._refresh_process_list_window()
 
     def _choose_root(self):
-        selected = filedialog.askdirectory(initialdir=str(self.root_dir), title="选择进程根目录")
+        selected = filedialog.askdirectory(initialdir=str(self.root_dir), title=self._t("set_root"))
         if selected:
             self.root_dir = Path(selected)
             self.manager.root_dir = self.root_dir
             self.root_label.configure(text=str(self.root_dir))
             self._save_config()
-            self.status.configure(text=f"根目录：{self.root_dir}")
+            self.status.configure(text=self._t("root_changed", root=self.root_dir))
 
     def _add(self):
-        dialog = ProcessDialog(self._dialog_parent())
+        dialog = ProcessDialog(self._dialog_parent(), lang=self.lang)
         self.wait_window(dialog)
         if dialog.result:
+            if self.lang == "zh":
+                dialog.result.name_zh = dialog.result.name
+            else:
+                dialog.result.name_en = dialog.result.name
             dialog.result.lsl_streams = scan_lsl_streams(dialog.result.command, self.root_dir)
             anchor = self._selection_anchor()
             if isinstance(anchor, ManagedProcess):
@@ -1457,11 +1616,20 @@ class App(tk.Tk):
             return
         self.selected = self.selected_items[0]
         readonly = self.selected.running
-        dialog = ProcessDialog(self._dialog_parent(), self.selected.spec, readonly=readonly)
+        dialog = ProcessDialog(self._dialog_parent(), self.selected.spec, readonly=readonly, lang=self.lang)
         self.wait_window(dialog)
         if not readonly and dialog.result:
             dialog.result.lsl_streams = scan_lsl_streams(dialog.result.command, self.root_dir)
+            edited_name = dialog.result.name
+            previous_spec = self.selected.spec
+            dialog.result.name = previous_spec.name
+            dialog.result.name_zh = previous_spec.name_zh
+            dialog.result.name_en = previous_spec.name_en
             self.selected.spec = dialog.result
+            if self.lang == "zh":
+                self.selected.spec.name_zh = edited_name
+            else:
+                self.selected.spec.name_en = edited_name
             self._save_config(); self._refresh_tree()
 
     def _edit_from_keyboard(self, _event=None):
@@ -1476,9 +1644,9 @@ class App(tk.Tk):
             if not groups:
                 return
             if any(item.running for group in groups for item in group.items):
-                messagebox.showwarning("无法移除分组", "请先终止分组内所有进程。", parent=self._dialog_parent())
+                messagebox.showwarning(self._t("cannot_remove_group"), self._t("stop_group_first"), parent=self._dialog_parent())
                 return
-            dialog = GroupRemoveDialog(self._dialog_parent(), len(groups)); self.wait_window(dialog)
+            dialog = GroupRemoveDialog(self._dialog_parent(), len(groups), lang=self.lang); self.wait_window(dialog)
             if dialog.result == "cancel":
                 return
             for group in groups:
@@ -1487,7 +1655,7 @@ class App(tk.Tk):
             self._save_config(); self._refresh_tree(); self._show_log(None)
             return
         removable = [item for item in self.selected_items if not item.running]
-        if not removable or not messagebox.askyesno("移除进程", f"确定移除选中的 {len(removable)} 个进程吗？", parent=self._dialog_parent()):
+        if not removable or not messagebox.askyesno(self._t("remove_process"), self._t("confirm_remove", count=len(removable)), parent=self._dialog_parent()):
             return
         removed = False
         for item in removable:
@@ -1554,7 +1722,7 @@ class App(tk.Tk):
             return
         x, y, width, height = bbox
         editor = ttk.Entry(self.tree)
-        editor.insert(0, group.name)
+        editor.insert(0, self._group_name(group))
         editor.select_range(0, "end")
         editor.place(x=x, y=y, width=max(width, 80), height=height)
         # Hand focus to the IME exactly once. Re-focusing or changing the
@@ -1569,7 +1737,10 @@ class App(tk.Tk):
             finished = True
             name = editor.get().strip()
             if name:
-                group.name = name
+                if self.lang == "zh":
+                    group.name_zh = name
+                else:
+                    group.name_en = name
             editor.destroy()
             self._save_config(); self._refresh_tree()
             return "break"
@@ -1582,18 +1753,19 @@ class App(tk.Tk):
             return
         if self.selected_groups:
             any_running = any(item.running for item in self.selected_items)
-            start_text = "终止分组" if any_running else "启动分组"
+            start_text = self._t("stop_group") if any_running else self._t("start_group")
             start_icon = "stop" if any_running else "play"
         elif len(self.selected_items) > 1:
             any_running = any(item.running for item in self.selected_items)
-            start_text = "全部终止" if any_running else "全部启动"
+            start_text = self._t("stop_all") if any_running else self._t("start_all")
             start_icon = "stop" if any_running else "play"
         elif self.selected:
-            start_text = "终止" if self.selected.running else "启动"
+            start_text = self._t("stop") if self.selected.running else self._t("start")
             start_icon = "stop" if self.selected.running else "play"
         else:
-            start_text, start_icon = "启动", "play"
-        restart_text = "全部重启" if self.selected_groups or len(self.selected_items) > 1 else "重启"
+            start_text, start_icon = self._t("start"), "play"
+        # restart_text = "全部重启" if self.selected_groups or len(self.selected_items) > 1 else "重启"
+        restart_text = self._t("restart_all") if self.selected_groups or len(self.selected_items) > 1 else self._t("restart")
         self.start_button.configure(text=start_text, icon=start_icon, long_press_text=restart_text)
         if self.floating_start_button is not None and self.floating_start_button.winfo_exists():
             self.floating_start_button.configure(text=start_text, icon=start_icon, long_press_text=restart_text)
@@ -1602,7 +1774,8 @@ class App(tk.Tk):
         can_control_gui = bool(self.selected_items and any(item.running for item in self.selected_items))
         selected_modes = {item.gui_mode for item in self.selected_items}
         gui_mode = self.selected.gui_mode if self.selected and len(selected_modes) != 1 else (next(iter(selected_modes)) if len(selected_modes) == 1 else "auto")
-        labels = {"auto": ("自动调度", "monitor"), "show": ("保持显示", "monitor"), "hide": ("保持隐藏", "monitor")}
+        # labels = {"auto": ("自动调度", "monitor"), "show": ("保持显示", "monitor"), "hide": ("保持隐藏", "monitor")}
+        labels = {"auto": (self._t("auto"), "monitor"), "show": (self._t("show"), "monitor"), "hide": (self._t("hide"), "monitor")}
         gui_text, gui_icon = labels[gui_mode]
         self.gui_button.configure(text=gui_text, icon=gui_icon)
         if self.floating_gui_button is not None and self.floating_gui_button.winfo_exists():
@@ -1611,10 +1784,11 @@ class App(tk.Tk):
         if self.floating_gui_button is not None and self.floating_gui_button.winfo_exists():
             self.floating_gui_button.configure(state="normal" if can_control_gui else "disabled")
         can_edit = not self.selected_groups and len(self.selected_items) == 1
-        self.edit_button.configure(text="配置" if can_edit and self.selected_items[0].running else "编辑", icon="monitor" if can_edit and self.selected_items[0].running else "edit")
+        self.edit_button.configure(text=self._t("configure") if can_edit and self.selected_items[0].running else self._t("edit"), icon="monitor" if can_edit and self.selected_items[0].running else "edit")
         self.edit_button.configure(state="normal" if can_edit else "disabled")
         if self.floating_edit_button is not None and self.floating_edit_button.winfo_exists():
-            floating_edit_text = "配置" if can_edit and self.selected_items[0].running else "编辑"
+            # floating_edit_text = "配置" if can_edit and self.selected_items[0].running else "编辑"
+            floating_edit_text = self._t("configure") if can_edit and self.selected_items[0].running else self._t("edit")
             floating_edit_icon = "monitor" if can_edit and self.selected_items[0].running else "edit"
             self.floating_edit_button.configure(text=floating_edit_text, icon=floating_edit_icon, state="normal" if can_edit else "disabled")
         can_remove = (bool(self.selected_groups) and any(not group.locked for group in self.selected_groups)) or bool(self.selected_items)
@@ -1718,12 +1892,12 @@ class App(tk.Tk):
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         if not item:
-            self.log_status.configure(text="未选择进程")
+            self.log_status.configure(text=self._t("no_process"))
             self._refresh_process_terminal()
             return
         lines = list(item.lines[-1200:])
-        suffix = "运行中" if item.running else "已停止"
-        self.log_status.configure(text=f"{item.spec.name}  /  {len(item.lines)} 行 / {suffix}")
+        suffix = self._t("running") if item.running else self._t("stopped")
+        self.log_status.configure(text=f"{self._item_name(item)}  /  {len(item.lines)} {self._t('lines')} / {suffix}")
         self._refresh_process_terminal()
         def render_chunk(offset=0):
             if render_id != self._log_render_id:
@@ -1771,12 +1945,12 @@ class App(tk.Tk):
             return
         running_targets = [item for item in self.selected_items if item.running]
         if len(self.selected_items) > 1 and running_targets:
-            label = "分组" if self.selected_groups else "选中的进程"
-            if not messagebox.askyesno("终止进程", f"确定终止{label}内的全部进程吗？", parent=self._dialog_parent()):
+            label = self._t("process_list") if self.selected_groups else self._t("name")
+            if not messagebox.askyesno(self._t("stop_process"), self._t("confirm_stop_all", label=label), parent=self._dialog_parent()):
                 return
             self._stop()
         elif len(self.selected_items) == 1 and self.selected_items[0].running:
-            if not messagebox.askyesno("终止进程", f"确定终止进程“{self.selected_items[0].spec.name}”吗？", parent=self._dialog_parent()):
+            if not messagebox.askyesno(self._t("stop_process"), self._t("confirm_stop_one", name=self.selected_items[0].spec.name), parent=self._dialog_parent()):
                 return
             self._stop()
         else:
@@ -1824,7 +1998,7 @@ class App(tk.Tk):
             if item in self.selected_items:
                 self.window_controller.set_visible(item, False)
             self.after_idle(self._refresh_tree)
-            self.status.configure(text=f"{item.spec.name} 已退出，返回码：{payload}")
+            self.status.configure(text=self._t("exited", name=self._item_name(item), code=payload))
 
     def _tick(self):
         self.manager.drain_events()
@@ -1833,8 +2007,8 @@ class App(tk.Tk):
     def _close(self):
         running = [item for item in self.manager.items if item.running]
         if running and not messagebox.askyesno(
-            "退出控制台",
-            "关闭控制台将同步终止所有控制台唤起的进程，是否继续？",
+            self._t("exiting"),
+            self._t("confirm_exit"),
             parent=self._dialog_parent(),
         ):
             return

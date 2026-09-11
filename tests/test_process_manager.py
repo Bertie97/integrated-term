@@ -262,6 +262,16 @@ class ProcessManagerTests(unittest.TestCase):
         self.assertTrue(ungrouped.locked)
         self.assertEqual([item.spec.name for item in ungrouped.items], ["a", "b"])
 
+    def test_group_open_close_events_are_ignored_during_tree_refresh(self):
+        app = object.__new__(App)
+        app._refreshing_tree = True
+        group = type("Group", (), {"expanded": True})()
+        app.tree = type("Tree", (), {"focus": lambda self: "stale"})()
+        app.manager = type("Manager", (), {"groups": [group]})()
+        app._group_opened()
+        app._group_closed()
+        self.assertTrue(group.expanded)
+
     def test_window_visibility_state_is_per_process_pid(self):
         controller = WindowController(None)
         item = ManagedProcess(ProcessSpec("viewer", "echo"))
