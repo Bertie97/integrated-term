@@ -30,13 +30,36 @@ from lsl_registry import (
     build_entry,
     prune_registry,
     register_process,
+    scan_python_cli_option,
     scan_lsl_streams,
     unregister_process,
 )
+from version import VERSION_STRING
 
 
 APP_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = APP_DIR / "processes.json"
+BUNDLED_CONFIG_PATH = APP_DIR / "processes.json"
+
+
+def child_environment() -> dict[str, str]:
+    """Prevent the frozen Tk runtime from contaminating launched applications."""
+    environment = os.environ.copy()
+    environment.pop("TCL_LIBRARY", None)
+    environment.pop("TK_LIBRARY", None)
+    return environment
+
+
+def user_config_path(target: str | None = None) -> Path:
+    if target is None:
+        target = {"Darwin": "macos", "Windows": "windows"}.get(platform.system(), "linux")
+    if target == "macos":
+        return Path.home() / "Library" / "Application Support" / "IntegratedTerm" / "processes.json"
+    if target == "windows":
+        return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "IntegratedTerm" / "processes.json"
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "integrated-term" / "processes.json"
+
+
+CONFIG_PATH = user_config_path() if getattr(sys, "frozen", False) else BUNDLED_CONFIG_PATH
 FA_ICON_DIR = APP_DIR / "assets" / "icons" / "fa"
 ANSI_CSI = re.compile(r"\x1b\[([0-9;]*)m")
 PLATFORM_BLOCK = re.compile(r"(?ms)^\[(windows|macos|ubuntu|linux|default)\]\s*\n(.*?)(?=^\[(?:windows|macos|ubuntu|linux|default)\]\s*$|\Z)")
@@ -52,8 +75,9 @@ UI_TEXT = {
         "start_all": "全部启动", "stop_all": "全部终止", "restart": "重启", "restart_all": "全部重启",
         "auto": "自动调度", "show": "保持显示", "hide": "保持隐藏", "edit": "编辑", "configure": "配置",
         "remove": "移除", "terminal": "终端", "ready": "就绪", "no_process": "未选择进程",
-        "running": "运行中", "stopped": "已停止", "idle": "空闲", "exited": "已退出", "lines": "行", "language": "EN", "process_config": "进程配置",
+        "running": "运行中", "stopping": "正在终止", "stopped": "已停止", "idle": "空闲", "exited": "已退出", "lines": "行", "language": "EN", "process_config": "进程配置",
         "add_process_title": "添加进程", "edit_process_title": "编辑进程", "process_name": "进程名称",
+        "supports_lang": "适配中英文切换（自动添加 --lang ch/en）",
         "cli_command": "CLI 命令", "newline_hint": "使用⇪+↩︎换行", "close": "关闭", "cancel": "取消",
         "save": "保存", "incomplete": "信息不完整", "fill_required": "请填写进程名称和 CLI 命令。",
         "remove_group": "移除分组", "remove_group_question": "将移除选中的 {count} 个分组。是否同时移除组内进程？",
@@ -64,7 +88,7 @@ UI_TEXT = {
         "exiting": "退出控制台", "confirm_exit": "关闭控制台将同步终止所有控制台唤起的进程，是否继续？",
         "import_failed": "导入失败", "save_failed": "保存失败", "invalid_config": "配置文件格式无效：\n{error}",
         "cannot_save": "无法保存配置文件：\n{error}", "imported": "已导入 {items} 个进程、{groups} 个分组",
-        "saved": "配置已保存：{target}", "root_changed": "根目录：{root}", "exited": "{name} 已退出，返回码：{code}",
+        "saved": "配置已保存：{target}", "root_changed": "根目录：{root}", "exited": "{name} 已退出，返回码：{code}", "exited_state": "已退出",
         "json_config": "JSON 配置", "all_files": "所有文件", "terminal_output": "终端输出",
     },
     "en": {
@@ -76,8 +100,9 @@ UI_TEXT = {
         "start_all": "Start All", "stop_all": "Stop All", "restart": "Restart", "restart_all": "Restart All",
         "auto": "Auto", "show": "Keep Visible", "hide": "Keep Hidden", "edit": "Edit", "configure": "Configure",
         "remove": "Remove", "terminal": "Terminal", "ready": "Ready", "no_process": "No process selected",
-        "running": "Running", "stopped": "Stopped", "idle": "Idle", "exited": "Exited", "lines": "lines", "language": "中文", "process_config": "Process Configuration",
+        "running": "Running", "stopping": "Stopping", "stopped": "Stopped", "idle": "Idle", "exited": "Exited", "lines": "lines", "language": "中文", "process_config": "Process Configuration",
         "add_process_title": "Add Process", "edit_process_title": "Edit Process", "process_name": "Process Name",
+        "supports_lang": "Supports Chinese/English switching (adds --lang ch/en)",
         "cli_command": "CLI Command", "newline_hint": "Use ⇪+↩︎ for a new line", "close": "Close", "cancel": "Cancel",
         "save": "Save", "incomplete": "Incomplete", "fill_required": "Enter a process name and CLI command.",
         "remove_group": "Remove Group", "remove_group_question": "Remove {count} selected group(s). Also remove their processes?",
@@ -88,7 +113,7 @@ UI_TEXT = {
         "exiting": "Exit Cockpit", "confirm_exit": "Exiting will stop all processes launched by this cockpit. Continue?",
         "import_failed": "Import Failed", "save_failed": "Save Failed", "invalid_config": "Invalid config file:\n{error}",
         "cannot_save": "Could not save config file:\n{error}", "imported": "Imported {items} process(es), {groups} group(s)",
-        "saved": "Config saved: {target}", "root_changed": "Root: {root}", "exited": "{name} exited, return code: {code}",
+        "saved": "Config saved: {target}", "root_changed": "Root: {root}", "exited": "{name} exited, return code: {code}", "exited_state": "Exited",
         "json_config": "JSON config", "all_files": "All files", "terminal_output": "Terminal Output",
     },
 }
@@ -156,6 +181,14 @@ def translate_command(command: str, target: str | None = None) -> str:
     return selected.strip()
 
 
+def command_with_language(command: str, lang: str, target: str | None = None) -> str:
+    translated = translate_command(command, target)
+    value = "ch" if lang == "zh" else "en"
+    if re.search(r"(?<!\S)--lang(?:=|\s+)\S+", translated):
+        return re.sub(r"(?<!\S)--lang(?:=|\s+)\S+", f"--lang {value}", translated)
+    return f"{translated.rstrip()} --lang {value}".strip()
+
+
 class PlatformRuntime:
     """System API and shell adapter used by the process manager."""
 
@@ -168,6 +201,9 @@ class PlatformRuntime:
 
     def command_args(self, command: str) -> list[str]:
         command = translate_command(command, self.target)
+        return self.translated_command_args(command)
+
+    def translated_command_args(self, command: str) -> list[str]:
         if self.is_windows:
             return [os.environ.get("ComSpec", "cmd.exe"), "/d", "/s", "/c", command]
         shell = "/bin/sh"
@@ -186,6 +222,13 @@ class PlatformRuntime:
         if self.is_windows:
             return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
         return {"start_new_session": True}
+
+
+def probe_language_support(command: str, root_dir: Path, target: str | None = None, timeout: float = 3.0) -> bool:
+    """Statically detect --lang support without launching the configured process."""
+    del timeout  # Retained for compatibility with callers of the former runtime probe.
+    selected, _context = select_platform_command(command, target)
+    return scan_python_cli_option(selected, root_dir, "--lang")
 
 
 def clean_terminal_text(value: str) -> str:
@@ -293,7 +336,7 @@ class RoundedButton(tk.Canvas):
             self.create_arc(left, top, left + size, top + size, start=90, extent=-360 * progress,
                             style="arc", outline="#ffffff", width=2, tags="long-press-progress")
         display_text = self._long_press_text if pressing else self._text
-        icon_width = 14 if self._icon else 0
+        icon_width = 18 if self._icon else 0
         text_width = len(display_text) * 5.5
         content_width = text_width + (icon_width + 5 if self._icon else 0)
         content_left = (self._width - content_width) / 2
@@ -326,7 +369,9 @@ class RoundedButton(tk.Canvas):
         path = FA_ICON_DIR / f"{icon}-{variant}.png"
         try:
             cache_key = (icon, variant)
-            image = self._icon_images.setdefault(cache_key, tk.PhotoImage(file=str(path)))
+            if cache_key not in self._icon_images:
+                self._icon_images[cache_key] = tk.PhotoImage(file=str(path))
+            image = self._icon_images[cache_key]
         except tk.TclError as exc:
             raise RuntimeError(f"无法加载 Font Awesome 图标资源: {path}") from exc
         self.create_image(cx, cy, image=image)
@@ -420,6 +465,7 @@ class ProcessSpec:
     lsl_streams: list[dict] = field(default_factory=list)
     name_zh: str | None = None
     name_en: str | None = None
+    supports_lang: bool | None = None
 
     def localized_name(self, lang: str) -> str:
         """Return the requested process name, falling back across languages."""
@@ -436,8 +482,10 @@ class ManagedProcess:
     started_at: float | None = None
     return_code: int | None = None
     reader: threading.Thread | None = None
+    waiter: threading.Thread | None = None
     stopping: bool = False
     gui_mode: str = "auto"  # auto: selected process is visible; show/hide are persistent
+    run_id: int = 0
 
     @property
     def running(self) -> bool:
@@ -625,13 +673,14 @@ class WindowController:
 
 
 class ProcessManager:
-    def __init__(self, root_dir: Path, on_event):
+    def __init__(self, root_dir: Path, on_event, lang: str = "zh"):
         prune_registry()
         self.root_dir = root_dir
         self.runtime = PlatformRuntime()
         self.on_event = on_event
+        self.lang = lang
         self.groups: list[ProcessGroup] = [ProcessGroup("无分组", locked=True)]
-        self.events: queue.Queue[tuple[str, ManagedProcess, str | None]] = queue.Queue()
+        self.events: queue.Queue[tuple[str, ManagedProcess, str | None, int]] = queue.Queue()
 
     @property
     def items(self) -> list[ManagedProcess]:
@@ -677,16 +726,17 @@ class ProcessManager:
         if item.running:
             return
         self.root_dir.mkdir(parents=True, exist_ok=True)
-        command = translate_command(item.spec.command, self.runtime.target)
+        command = command_with_language(item.spec.command, self.lang, self.runtime.target) if item.spec.supports_lang else translate_command(item.spec.command, self.runtime.target)
         try:
             item.process = subprocess.Popen(
-                self.runtime.command_args(item.spec.command),
+                self.runtime.translated_command_args(command),
                 cwd=str(self.root_dir),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
                 text=True,
                 bufsize=1,
+                env=child_environment(),
                 **self.runtime.popen_kwargs(),
             )
         except OSError as exc:
@@ -697,27 +747,36 @@ class ProcessManager:
         item.return_code = None
         item.stopping = False
         item.started_at = time.time()
-        register_process(build_entry(item.process.pid, item.spec.name, command, self.root_dir, item.spec.lsl_streams, item.started_at))
-        item.reader = threading.Thread(target=self._read_output, args=(item,), daemon=True)
+        item.run_id += 1
+        run_id = item.run_id
+        process = item.process
+        started_at = item.started_at
+        register_process(build_entry(process.pid, item.spec.name, command, self.root_dir, item.spec.lsl_streams, started_at))
+        item.reader = threading.Thread(target=self._read_output, args=(item, process, run_id), daemon=True)
         item.reader.start()
+        item.waiter = threading.Thread(target=self._wait_for_exit, args=(item, process, run_id, started_at), daemon=True)
+        item.waiter.start()
         self.on_event("changed", item, None)
 
-    def _read_output(self, item: ManagedProcess) -> None:
-        assert item.process is not None
-        stream = item.process.stdout
+    def _read_output(self, item: ManagedProcess, process: subprocess.Popen, run_id: int) -> None:
+        stream = process.stdout
         if stream:
             for line in iter(stream.readline, ""):
-                self.events.put(("line", item, line.rstrip("\r\n")))
+                self.events.put(("line", item, line.rstrip("\r\n"), run_id))
             stream.close()
-        item.process.wait()
-        item.return_code = item.process.returncode
-        self.events.put(("exit", item, str(item.return_code)))
-        unregister_process(item.process.pid, started_at=item.started_at)
+
+    def _wait_for_exit(self, item: ManagedProcess, process: subprocess.Popen, run_id: int, started_at: float) -> None:
+        return_code = process.wait()
+        if item.run_id == run_id:
+            item.return_code = return_code
+        self.events.put(("exit", item, str(return_code), run_id))
+        unregister_process(process.pid, started_at=started_at)
 
     def stop(self, item: ManagedProcess) -> None:
         if not item.running or item.process is None or item.stopping:
             return
         item.stopping = True
+        self.on_event("changed", item, None)
         threading.Thread(target=self._terminate_process_tree, args=(item,), daemon=True).start()
 
     def stop_all(self) -> None:
@@ -767,6 +826,7 @@ class ProcessManager:
         process = item.process
         if process is None:
             item.stopping = False
+            self.events.put(("changed", item, None, item.run_id))
             return
         pid = process.pid
         if self.runtime.is_windows:
@@ -779,11 +839,13 @@ class ProcessManager:
                 )
             finally:
                 item.stopping = False
+                self.events.put(("changed", item, None, item.run_id))
             return
         try:
             pgid = os.getpgid(pid)
         except OSError:
             item.stopping = False
+            self.events.put(("changed", item, None, item.run_id))
             return
         snapshot = self._process_snapshot()
         owned = {pid, *self._descendants(pid)}
@@ -826,13 +888,16 @@ class ProcessManager:
                 except OSError:
                     continue
         item.stopping = False
+        self.events.put(("changed", item, None, item.run_id))
 
     def drain_events(self) -> None:
         while True:
             try:
-                kind, item, payload = self.events.get_nowait()
+                kind, item, payload, run_id = self.events.get_nowait()
             except queue.Empty:
                 return
+            if run_id != item.run_id:
+                continue
             if kind == "line" and payload is not None:
                 item.lines.append(payload)
                 item.lines[:] = item.lines[-4000:]
@@ -844,8 +909,61 @@ def shutil_available(name: str) -> bool:
     return which(name) is not None
 
 
+class LanguageToggle(tk.Canvas):
+    """Compact capsule switch without the platform Checkbutton background."""
+
+    def __init__(self, parent, variable: tk.BooleanVar, command=None, **kwargs):
+        super().__init__(parent, width=44, height=24, highlightthickness=0, bd=0, relief="flat", **kwargs)
+        self.variable = variable
+        self.command = command
+        self._state = "normal"
+        self.variable.trace_add("write", lambda *_args: self._draw())
+        self.bind("<Button-1>", self._toggle)
+        self.bind("<Key-space>", self._toggle)
+        self.bind("<Return>", self._toggle)
+        self.bind("<FocusIn>", lambda _event: self._draw())
+        self.bind("<FocusOut>", lambda _event: self._draw())
+        self.configure(cursor="hand2", takefocus=True)
+        self._draw()
+
+    def _toggle(self, _event=None):
+        if self._state == "disabled":
+            return "break"
+        self.variable.set(not self.variable.get())
+        if self.command:
+            self.command()
+        return "break"
+
+    def configure(self, cnf=None, **kwargs):
+        state = kwargs.pop("state", None)
+        result = super().configure(cnf, **kwargs)
+        if state is not None:
+            self._state = state
+            super().configure(cursor="arrow" if state == "disabled" else "hand2")
+            self._draw()
+        return result
+
+    config = configure
+
+    def _draw(self):
+        if not self.winfo_exists():
+            return
+        self.delete("all")
+        enabled = bool(self.variable.get())
+        disabled = self._state == "disabled"
+        track = "#d8e0ea" if disabled else ("#0b72e7" if enabled else "#b8c4d2")
+        knob = "#f8fafc" if disabled else "#ffffff"
+        self.create_oval(1, 1, 23, 23, fill=track, outline=track)
+        self.create_oval(21, 1, 43, 23, fill=track, outline=track)
+        self.create_rectangle(12, 1, 32, 23, fill=track, outline=track)
+        left = 3 if not enabled else 21
+        self.create_oval(left, 3, left + 18, 21, fill=knob, outline="#cbd5e1" if disabled else knob, width=1)
+        if self.focus_get() is self and not disabled:
+            self.create_oval(0, 0, 44, 24, outline="#75b7ff", width=1)
+
+
 class ProcessDialog(tk.Toplevel):
-    def __init__(self, parent, initial: ProcessSpec | None = None, readonly: bool = False, lang: str = "zh"):
+    def __init__(self, parent, initial: ProcessSpec | None = None, readonly: bool = False, lang: str = "zh", root_dir: Path | None = None, target: str | None = None):
         super().__init__(parent)
         self.lang = lang
         self._t = lambda key, **kwargs: _text(self.lang, key, **kwargs)
@@ -853,6 +971,9 @@ class ProcessDialog(tk.Toplevel):
         self.bind_class(self._escape_tag, "<KeyPress-Escape>", self._cancel)
         self.title(self._t("add_process_title") if initial is None else (self._t("process_config") if readonly else self._t("edit_process_title")))
         self.readonly = readonly
+        self.root_dir = root_dir or Path.cwd()
+        self.target = target
+        self._supports_lang_touched = initial is not None and initial.supports_lang is not None
         self.resizable(False, False)
         self.result: ProcessSpec | None = None
         self.transient(parent)
@@ -874,12 +995,26 @@ class ProcessDialog(tk.Toplevel):
             self.command_text.insert("1.0", initial.command)
         if readonly:
             self.command_text.configure(state="disabled")
-        ttk.Label(body, text=self._t("newline_hint"), style="Muted.TLabel").grid(row=4, column=0, sticky="w", pady=(0, 8))
+        self.supports_lang_var = tk.BooleanVar(value=bool(initial.supports_lang) if initial else False)
+        language_row = tk.Frame(body, bg="#f4f7fb")
+        language_row.grid(row=4, column=0, sticky="w", pady=(0, 8))
+        self.supports_lang_toggle = LanguageToggle(
+            language_row,
+            self.supports_lang_var,
+            command=lambda: setattr(self, "_supports_lang_touched", True),
+            bg="#f4f7fb",
+        )
+        self.supports_lang_toggle.pack(side="left", padx=(0, 10))
+        self.supports_lang_label = ttk.Label(language_row, text=self._t("supports_lang"), style="TLabel")
+        self.supports_lang_label.pack(side="left")
+        if readonly:
+            self.supports_lang_toggle.configure(state="disabled")
+        ttk.Label(body, text=self._t("newline_hint"), style="Muted.TLabel").grid(row=5, column=0, sticky="w", pady=(0, 8))
         actions = ttk.Frame(body)
-        actions.grid(row=5, column=0, sticky="e")
+        actions.grid(row=6, column=0, sticky="e")
         cancel_button = ttk.Button(actions, text=self._t("close") if readonly else self._t("cancel"), command=self.destroy)
         cancel_button.pack(side="right", padx=(8, 0))
-        focus_widgets = [body, self.name_entry, self.command_text, actions, cancel_button]
+        focus_widgets = [body, self.name_entry, self.command_text, self.supports_lang_toggle, actions, cancel_button]
         if not readonly:
             save_button = ttk.Button(actions, text=self._t("save"), command=self.save)
             save_button.pack(side="right")
@@ -897,7 +1032,6 @@ class ProcessDialog(tk.Toplevel):
             if self._escape_tag not in tags:
                 widget.bindtags(tags + (self._escape_tag,))
         self.protocol("WM_DELETE_WINDOW", self.destroy)
-
     def _present(self):
         if self.winfo_exists():
             self.lift()
@@ -930,7 +1064,10 @@ class ProcessDialog(tk.Toplevel):
         if not name or not command:
             messagebox.showwarning(self._t("incomplete"), self._t("fill_required"), parent=self)
             return
-        self.result = ProcessSpec(name, command)
+        supports_lang = self.supports_lang_var.get()
+        if not self._supports_lang_touched:
+            supports_lang = probe_language_support(command, self.root_dir, self.target)
+        self.result = ProcessSpec(name, command, supports_lang=supports_lang)
         self.destroy()
 
 
@@ -967,13 +1104,15 @@ class App(tk.Tk):
         self._style()
         self.runtime = PlatformRuntime()
         self.root_dir = resolve_config_path(self._load_config().get("root_dir", str(APP_DIR)), self.runtime.target)
-        self.manager = ProcessManager(self.root_dir, self._manager_event)
+        self.manager = ProcessManager(self.root_dir, self._manager_event, self.lang)
         self.window_controller = WindowController(self)
         self.selected: ManagedProcess | None = None
         self.selected_items: list[ManagedProcess] = []
         self.selected_group: ProcessGroup | None = None
         self.selected_groups: list[ProcessGroup] = []
         self._drag_item: ManagedProcess | None = None
+        self._drag_origin: tuple[int, int] | None = None
+        self._drag_active = False
         self._refreshing_tree = False
         self._log_render_id = 0
         self._log_refresh_pending = False
@@ -982,6 +1121,7 @@ class App(tk.Tk):
         self.floating_start_button: RoundedButton | None = None
         self.floating_gui_button: RoundedButton | None = None
         self.floating_edit_button: RoundedButton | None = None
+        self.floating_remove_button: RoundedButton | None = None
         self.process_terminal_window: tk.Toplevel | None = None
         self.process_terminal_text: tk.Text | None = None
         self.process_terminal_status: ttk.Label | None = None
@@ -1008,6 +1148,15 @@ class App(tk.Tk):
     def _group_name(self, group: ProcessGroup) -> str:
         return group.localized_name(self.__dict__.get("lang", "zh"))
 
+    def _item_state_text(self, item: ManagedProcess) -> str:
+        if item.stopping:
+            return self._t("stopping")
+        if item.running:
+            return self._t("running")
+        if item.return_code is not None:
+            return f"{self._t('exited_state')} {item.return_code}"
+        return self._t("idle")
+
     def _style(self):
         style = ttk.Style(self)
         style.theme_use("clam")
@@ -1029,19 +1178,24 @@ class App(tk.Tk):
 
     def _toggle_language(self):
         self.lang = "en" if self.lang == "zh" else "zh"
+        self.manager.lang = self.lang
         self.title(self._t("app_title"))
         for key, text_key in (("integrated_label", "integrated"), ("console_label", "console"),
                               ("root_button", "set_root"), ("import_button", "import_config"),
                               ("export_button", "export_config"), ("process_list_label", "process_list"),
                               ("add_button", "add_process"), ("group_button", "new_group"),
-                              ("output_label", "output")):
+                              ("output_label", "output"), ("remove_button", "remove")):
             widget = self._ui_widgets.get(key)
             if widget is not None:
                 widget.configure(text=f"  {self._t(text_key)}" if key == "console_label" else self._t(text_key))
         self.language_button.configure(text=self._t("language"))
         self.tree.heading("#0", text=self._t("name"))
-        self.tree.heading("gui", text=self._t("gui"))
+        self.tree.heading("gui", text=self._t("gui"), anchor="center")
         self.tree.heading("state", text=self._t("state"))
+        if self.process_list_tree is not None and self.process_list_tree.winfo_exists():
+            self.process_list_tree.heading("gui", text=self._t("gui"), anchor="center")
+            self.process_list_tree.heading("#0", text=self._t("name"), anchor="w")
+            self.process_list_tree.heading("state", text=self._t("state"), anchor="w")
         self._refresh_process_list_window()
         if self.process_terminal_window is not None and self.process_terminal_window.winfo_exists():
             self.process_terminal_window.title(f"{self._t('integrated')} - {self._t('terminal_output')}")
@@ -1050,7 +1204,7 @@ class App(tk.Tk):
         self._update_action_labels()
 
     def _build_ui(self):
-        header = ttk.Frame(self, padding=(24, 18, 24, 12))
+        header = tk.Frame(self, bg="#f4f7fb", padx=24, pady=18)
         header.pack(fill="x")
         self._ui_widgets["integrated_label"] = ttk.Label(header, text=self._t("integrated"), style="Title.TLabel")
         self._ui_widgets["integrated_label"].pack(side="left")
@@ -1077,7 +1231,7 @@ class App(tk.Tk):
         split.add(left, weight=1)
         split.add(right, weight=2)
         left_content, right_content = left.content, right.content
-        top = ttk.Frame(left_content, style="Panel.TFrame")
+        top = tk.Frame(left_content, bg="#ffffff")
         top.pack(fill="x", pady=(0, 10))
         self._ui_widgets["process_list_label"] = ttk.Label(top, text=self._t("process_list"), style="SectionTitle.TLabel")
         self._ui_widgets["process_list_label"].pack(side="left")
@@ -1094,7 +1248,7 @@ class App(tk.Tk):
         self.tree.tag_configure("idle", foreground="#243954")
         self.tree.tag_configure("group", foreground="#1d5fa7", background="#eef5fc", font=("SF Pro Display", 12, "bold"))
         self.tree.heading("#0", text=self._t("name"), anchor="w")
-        self.tree.heading("gui", text=self._t("gui"), anchor="w")
+        self.tree.heading("gui", text=self._t("gui"), anchor="center")
         self.tree.heading("state", text=self._t("state"), anchor="w")
         self.tree.heading("pid", text="PID", anchor="w")
         self.tree.column("#0", width=150, stretch=True)
@@ -1124,6 +1278,7 @@ class App(tk.Tk):
         self.edit_button.pack(side="right")
         self.remove_button = RoundedButton(actions, text=self._t("remove"), command=self._remove, width=82, icon="trash")
         self.remove_button.pack(side="right", padx=6)
+        self._ui_widgets["remove_button"] = self.remove_button
 
         log_header = ttk.Frame(right_content, style="Panel.TFrame")
         log_header.pack(fill="x", pady=(0, 10))
@@ -1139,8 +1294,14 @@ class App(tk.Tk):
             self.log.tag_configure(tag, foreground=color)
         self.log.pack(fill="both", expand=True, padx=4, pady=4)
         self.log.bind("<KeyPress>", self._log_keypress)
-        self.status = ttk.Label(self, text=self._t("ready"), style="Muted.TLabel", padding=(24, 0, 24, 10))
-        self.status.pack(fill="x")
+        footer = ttk.Frame(self, style="TFrame")
+        footer.pack(fill="x", padx=24, pady=(0, 10))
+        self.status = ttk.Label(footer, text=self._t("ready"), style="Muted.TLabel")
+        self.status.pack(side="left")
+        brand = ttk.Frame(footer, style="TFrame")
+        brand.pack(side="right", anchor="e")
+        ttk.Label(brand, text=f"v{VERSION_STRING}", style="Muted.TLabel", anchor="e").pack(side="left", padx=(0, 8))
+        ttk.Label(brand, text="LOGO", style="Muted.TLabel", anchor="e").pack(side="left")
 
     def _style_tree_arrows(self):
         """Replace the theme indicator with compact text chevrons."""
@@ -1163,7 +1324,10 @@ class App(tk.Tk):
             # Copy both layouts so the theme's native arrow is actually gone.
             style.layout("Pretty.Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
             style.layout("Pretty.Treeview.Item", [replace(node) for node in style.layout("Treeview.Item")])
-            style.layout("Pretty.Treeview.Heading", [("Treeheading.text", {"sticky": "w"}), ("Treeheading.image", {"side": "right", "sticky": ""})])
+            # Let each column's heading(anchor=...) control text placement.
+            # A west-sticky text element overrides the GUI column's centered
+            # anchor on macOS's clam theme.
+            style.layout("Pretty.Treeview.Heading", [("Treeheading.text", {"sticky": "nswe"}), ("Treeheading.image", {"side": "right", "sticky": ""})])
             self.tree.configure(style="Pretty.Treeview")
             style.configure("Pretty.Treeview", borderwidth=0, relief="flat", padding=0, lightcolor="#ffffff", darkcolor="#ffffff")
             style.configure("Pretty.Treeview.Heading", background="#eef4fb", foreground="#5b708b", font=("SF Pro Display", 11, "bold"), borderwidth=0, relief="flat", padding=0, lightcolor="#eef4fb", darkcolor="#eef4fb")
@@ -1187,7 +1351,7 @@ class App(tk.Tk):
         tree = ttk.Treeview(frame, columns=("gui", "state", "pid"), show="tree headings", selectmode="extended")
         tree.configure(style="Pretty.Treeview")
         tree.heading("#0", text=self._t("name"), anchor="w")
-        tree.heading("gui", text=self._t("gui"), anchor="w")
+        tree.heading("gui", text=self._t("gui"), anchor="center")
         tree.heading("state", text=self._t("state"), anchor="w")
         tree.heading("pid", text="PID", anchor="w")
         tree.column("#0", width=220, stretch=True)
@@ -1209,7 +1373,8 @@ class App(tk.Tk):
         RoundedButton(actions, text=self._t("terminal"), command=self._toggle_process_terminal_window, width=78, icon="terminal").pack(side="left")
         self.floating_edit_button = RoundedButton(actions, text=self._t("edit"), command=self._edit, width=78, icon="edit")
         self.floating_edit_button.pack(side="right")
-        RoundedButton(actions, text=self._t("remove"), command=self._remove, width=78, icon="trash").pack(side="right", padx=6)
+        self.floating_remove_button = RoundedButton(actions, text=self._t("remove"), command=self._remove, width=78, icon="trash")
+        self.floating_remove_button.pack(side="right", padx=6)
         tree.bind("<<TreeviewSelect>>", self._floating_tree_selected)
         tree.bind("<Command-a>", self._select_all_processes)
         tree.bind("<Control-a>", self._select_all_processes)
@@ -1235,6 +1400,7 @@ class App(tk.Tk):
         self.floating_start_button = None
         self.floating_gui_button = None
         self.floating_edit_button = None
+        self.floating_remove_button = None
         self._floating_tree_map.clear()
         self.deiconify()
         self.lift()
@@ -1327,22 +1493,42 @@ class App(tk.Tk):
         output.configure(state="disabled")
 
     def _refresh_process_list_window(self):
-        # Legacy contract: text=f"    {marker}  {group.name}" (localized below).
+        # Keep stable row IDs so a process exit cannot leave a partially rebuilt suffix.
         tree = self.process_list_tree
         if tree is None or not tree.winfo_exists():
             return
-        tree.delete(*tree.get_children())
         self._floating_tree_map.clear()
-        for group in self.manager.groups:
+        desired = set()
+        for group_index, group in enumerate(self.manager.groups):
             running = any(item.running for item in group.items)
             marker = "▾" if group.expanded else "▸"
-            group_iid = tree.insert("", "end", text=f"    {marker}  {self._group_name(group)}", values=("", self._t("running") if running else self._t("idle"), ""), open=group.expanded, tags=("running" if running else "idle", "group"))
+            group_iid = f"group-{id(group)}"
+            desired.add(group_iid)
+            if tree.exists(group_iid):
+                tree.item(group_iid, text=f"    {marker}  {self._group_name(group)}", values=("", self._t("running") if running else self._t("idle"), ""), open=group.expanded, tags=("running" if running else "idle", "group"))
+                tree.move(group_iid, "", group_index)
+            else:
+                tree.insert("", group_index, iid=group_iid, text=f"    {marker}  {self._group_name(group)}", values=("", self._t("running") if running else self._t("idle"), ""), open=group.expanded, tags=("running" if running else "idle", "group"))
             self._floating_tree_map[group_iid] = group
-            for item in group.items:
-                state = self._t("running") if item.running else (f"{self._t('exited')} {item.return_code}" if item.return_code is not None else self._t("idle"))
+            for item_index, item in enumerate(group.items):
+                state = self._item_state_text(item)
                 pid = str(item.process.pid) if item.process and item.running else "-"
-                iid = tree.insert(group_iid, "end", text=self._item_name(item), values=({"auto": "◩", "show": "▣", "hide": "▢"}[item.gui_mode], state, pid), tags=("running" if item.running else "idle",))
+                iid = f"item-{id(item)}"
+                desired.add(iid)
+                values = ({"auto": "◩", "show": "▣", "hide": "▢"}[item.gui_mode], state, pid)
+                if tree.exists(iid):
+                    tree.item(iid, text=self._item_name(item), values=values, tags=("running" if item.running else "idle",))
+                    tree.move(iid, group_iid, item_index)
+                else:
+                    tree.insert(group_iid, item_index, iid=iid, text=self._item_name(item), values=values, tags=("running" if item.running else "idle",))
                 self._floating_tree_map[iid] = item
+        stale = []
+        for group_iid in tree.get_children(""):
+            stale.append(group_iid)
+            stale.extend(tree.get_children(group_iid))
+        for iid in stale:
+            if iid not in desired and tree.exists(iid):
+                tree.delete(iid)
 
     def _item_gui_visible(self, item: ManagedProcess) -> bool:
         return self.window_controller.is_visible(item)
@@ -1403,17 +1589,20 @@ class App(tk.Tk):
             "groups": [{"name": group.name, "name_zh": group.name_zh, "name_en": group.name_en, "locked": group.locked, "expanded": group.expanded,
                         "processes": [{"name": item.spec.name, "name_zh": item.spec.name_zh, "name_en": item.spec.name_en,
                                        "command": item.spec.command, "enabled": item.spec.enabled,
+                                       "supports_lang": item.spec.supports_lang,
                                        "gui_mode": item.gui_mode, "lsl_streams": item.spec.lsl_streams} for item in group.items]}
                        for group in self.manager.groups],
         }
 
     def _load_config(self):
+        source = CONFIG_PATH if CONFIG_PATH.exists() else BUNDLED_CONFIG_PATH
         try:
-            return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            return json.loads(source.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
 
     def _save_config(self):
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_PATH.write_text(json.dumps(self._config_data(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     def _export_config(self):
@@ -1492,7 +1681,15 @@ class App(tk.Tk):
                 name_zh = str(entry.get("name_zh") or "").strip() or None
                 name_en = str(entry.get("name_en") or "").strip() or None
                 group.items.append(ManagedProcess(
-                    ProcessSpec(legacy_name, str(entry["command"]).strip(), bool(entry.get("enabled", True)), streams, name_zh, name_en),
+                    ProcessSpec(
+                        legacy_name,
+                        str(entry["command"]).strip(),
+                        bool(entry.get("enabled", True)),
+                        streams,
+                        name_zh,
+                        name_en,
+                        entry.get("supports_lang") if isinstance(entry.get("supports_lang"), bool) else None,
+                    ),
                     gui_mode=gui_mode,
                 ))
             if group.name == "无分组":
@@ -1520,24 +1717,46 @@ class App(tk.Tk):
         self._refresh_tree()
 
     def _refresh_tree(self):
-        # Legacy contract: text=f"    {marker}  {group.name}" (localized below).
+        # Update rows in place. Rebuilding the whole tree during an exit event can
+        # interleave with native Treeview callbacks and truncate the visible suffix.
         selected_items = list(self.selected_items)
         selected_group = self.selected_group
         selected_groups = list(self.selected_groups)
         self._refreshing_tree = True
         try:
-            self.tree.delete(*self.tree.get_children())
-            for group in self.manager.groups:
+            desired = set()
+            for group_index, group in enumerate(self.manager.groups):
                 running = any(item.running for item in group.items)
                 marker = "▾" if group.expanded else "▸"
-                group_iid = self.tree.insert("", "end", text=f"    {marker}  {self._group_name(group)}", values=("", self._t("running") if running else self._t("idle"), ""), open=group.expanded, tags=("running" if running else "idle", "group"))
+                group_iid = f"group-{id(group)}"
+                desired.add(group_iid)
+                group_values = ("", self._t("running") if running else self._t("idle"), "")
+                if self.tree.exists(group_iid):
+                    self.tree.item(group_iid, text=f"    {marker}  {self._group_name(group)}", values=group_values, open=group.expanded, tags=("running" if running else "idle", "group"))
+                    self.tree.move(group_iid, "", group_index)
+                else:
+                    self.tree.insert("", group_index, iid=group_iid, text=f"    {marker}  {self._group_name(group)}", values=group_values, open=group.expanded, tags=("running" if running else "idle", "group"))
                 group._tree_id = group_iid
-                for item in group.items:
-                    state = self._t("running") if item.running else (f"{self._t('exited')} {item.return_code}" if item.return_code is not None else self._t("idle"))
+                for item_index, item in enumerate(group.items):
+                    state = self._item_state_text(item)
                     pid = str(item.process.pid) if item.process and item.running else "-"
                     gui_icon = {"auto": "◩", "show": "▣", "hide": "▢"}[item.gui_mode]
-                    iid = self.tree.insert(group_iid, "end", text=self._item_name(item), values=(gui_icon, state, pid), tags=("running" if item.running else "idle",))
+                    iid = f"item-{id(item)}"
+                    desired.add(iid)
+                    values = (gui_icon, state, pid)
+                    if self.tree.exists(iid):
+                        self.tree.item(iid, text=self._item_name(item), values=values, tags=("running" if item.running else "idle",))
+                        self.tree.move(iid, group_iid, item_index)
+                    else:
+                        self.tree.insert(group_iid, item_index, iid=iid, text=self._item_name(item), values=values, tags=("running" if item.running else "idle",))
                     item._tree_id = iid
+            stale = []
+            for group_iid in self.tree.get_children(""):
+                stale.append(group_iid)
+                stale.extend(self.tree.get_children(group_iid))
+            for iid in stale:
+                if iid not in desired and self.tree.exists(iid):
+                    self.tree.delete(iid)
             valid = [item for item in selected_items if item in self.manager.items]
             self.selected_items = valid
             valid_groups = [group for group in selected_groups if group in self.manager.groups]
@@ -1562,7 +1781,7 @@ class App(tk.Tk):
             self.status.configure(text=self._t("root_changed", root=self.root_dir))
 
     def _add(self):
-        dialog = ProcessDialog(self._dialog_parent(), lang=self.lang)
+        dialog = ProcessDialog(self._dialog_parent(), lang=self.lang, root_dir=self.root_dir, target=self.runtime.target)
         self.wait_window(dialog)
         if dialog.result:
             if self.lang == "zh":
@@ -1622,7 +1841,7 @@ class App(tk.Tk):
             return
         self.selected = self.selected_items[0]
         readonly = self.selected.running
-        dialog = ProcessDialog(self._dialog_parent(), self.selected.spec, readonly=readonly, lang=self.lang)
+        dialog = ProcessDialog(self._dialog_parent(), self.selected.spec, readonly=readonly, lang=self.lang, root_dir=self.root_dir, target=self.runtime.target)
         self.wait_window(dialog)
         if not readonly and dialog.result:
             dialog.result.lsl_streams = scan_lsl_streams(dialog.result.command, self.root_dir)
@@ -1799,15 +2018,27 @@ class App(tk.Tk):
             self.floating_edit_button.configure(text=floating_edit_text, icon=floating_edit_icon, state="normal" if can_edit else "disabled")
         can_remove = (bool(self.selected_groups) and any(not group.locked for group in self.selected_groups)) or bool(self.selected_items)
         self.remove_button.configure(state="normal" if can_remove else "disabled")
+        if getattr(self, "floating_remove_button", None) is not None and self.floating_remove_button.winfo_exists():
+            self.floating_remove_button.configure(text=self._t("remove"), state="normal" if can_remove else "disabled")
 
     def _drag_start(self, event):
         row = self.tree.identify_row(event.y)
         self._drag_group = next((group for group in self.manager.groups if getattr(group, "_tree_id", None) == row), None)
         self._drag_item = next((item for item in self.manager.items if getattr(item, "_tree_id", None) == row), None)
+        self._drag_origin = (event.x, event.y)
+        self._drag_active = False
 
     def _drag_motion(self, event):
         if not self._drag_item and not getattr(self, "_drag_group", None):
             return
+        if not self._drag_active:
+            if self._drag_origin is None:
+                return
+            dx = event.x - self._drag_origin[0]
+            dy = event.y - self._drag_origin[1]
+            if dx * dx + dy * dy < 8 * 8:
+                return
+            self._drag_active = True
         self._auto_scroll_drag(event.y)
         row = self.tree.identify_row(event.y)
         if not row:
@@ -1858,6 +2089,8 @@ class App(tk.Tk):
     def _drag_end(self, _event):
         self._drag_item = None
         self._drag_group = None
+        self._drag_origin = None
+        self._drag_active = False
         self._drag_scroll_at = 0.0
 
     def _group_at_y(self, y):

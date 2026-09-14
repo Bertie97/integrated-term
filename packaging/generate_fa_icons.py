@@ -27,11 +27,14 @@ COLORS = {"dark": "#243954", "white": "#ffffff", "muted": "#a8b4c1"}
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    font = ImageFont.truetype(str(FONT_PATH), 10)
+    # Render from the vector font at 4x, then downsample with Lanczos to the
+    # unchanged 18px Tk display size. This improves edge antialiasing.
+    font = ImageFont.truetype(str(FONT_PATH), 52)
     for name, code in ICON_CODES.items():
         for variant, color in COLORS.items():
-            image = Image.new("RGBA", (14, 14), (0, 0, 0, 0))
-            ImageDraw.Draw(image).text((7, 7), code, font=font, fill=color, anchor="mm")
+            source = Image.new("RGBA", (72, 72), (0, 0, 0, 0))
+            ImageDraw.Draw(source).text((36, 36), code, font=font, fill=color, anchor="mm")
+            image = source.resize((18, 18), Image.Resampling.LANCZOS)
             image.save(OUTPUT_DIR / f"{name}-{variant}.png")
 
 

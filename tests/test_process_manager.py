@@ -15,10 +15,14 @@ from app import (
     WindowController,
     ansi_segments,
     clean_terminal_text,
+    command_with_language,
+    child_environment,
     detect_platform,
+    probe_language_support,
     resolve_config_path,
     select_platform_command,
     translate_command,
+    user_config_path,
 )
 from lsl_registry import read_registry, register_process, registry_path, scan_lsl_streams
 
@@ -108,6 +112,114 @@ class ProcessManagerTests(unittest.TestCase):
             )
             self.assertEqual(PlatformRuntime("ubuntu").command_args("echo ok")[:3], ["script", "-q", "-c"])
 
+    def test_language_argument_tracks_ui_language(self):
+        command = "python tool.py --value 1"
+        self.assertEqual(command_with_language(command, "zh", "macos"), "python tool.py --value 1 --lang ch")
+        self.assertEqual(command_with_language(command, "en", "macos"), "python tool.py --value 1 --lang en")
+        self.assertEqual(command_with_language("python tool.py --lang ch", "en", "macos"), "python tool.py --lang en")
+
+    def test_child_environment_does_not_leak_frozen_tk_paths(self):
+        with patch.dict("os.environ", {"TCL_LIBRARY": "/bundle/tcl", "TK_LIBRARY": "/bundle/tk"}, clear=False):
+            environment = child_environment()
+        self.assertNotIn("TCL_LIBRARY", environment)
+        self.assertNotIn("TK_LIBRARY", environment)
+
+    def test_language_support_is_detected_statically_without_launching_process(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "tool.py").write_text(
+                "import argparse\n"
+                "parser = argparse.ArgumentParser()\n"
+                "parser.add_argument('--lang', choices=('ch', 'en'))\n",
+                encoding="utf-8",
+            )
+            with patch("app.subprocess.Popen") as popen:
+                self.assertTrue(probe_language_support("python tool.py", root, "macos"))
+            popen.assert_not_called()
+
+    def test_language_support_static_scan_follows_imports_and_known_frameworks(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "main.py").write_text("from cli import run\nrun()\n", encoding="utf-8")
+            (root / "cli.py").write_text(
+                "import click\n"
+                "@click.option('--lang')\n"
+                "def run(lang=None): pass\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(probe_language_support("python main.py", root, "macos"))
+
+    def test_language_support_static_scan_accepts_virtualenv_python(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "sample"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "cli.py").write_text(
+                "import argparse\n"
+                "parser = argparse.ArgumentParser()\n"
+                "parser.add_argument('--lang')\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(probe_language_support(".venv/bin/python -m sample.cli", root, "macos"))
+
+    def test_language_support_static_scan_uses_package_main_module(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "sample"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "__main__.py").write_text("from .cli import main\nmain()\n", encoding="utf-8")
+            (package / "cli.py").write_text(
+                "import argparse\n"
+                "def main():\n"
+                "    parser = argparse.ArgumentParser()\n"
+                "    parser.add_argument('--lang')\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(probe_language_support("python -m sample", root, "macos"))
+
+    def test_language_support_static_scan_defaults_to_false_when_unknown(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "gui.py").write_text("print('GUI startup')\n", encoding="utf-8")
+            with patch("app.subprocess.Popen") as popen:
+                self.assertFalse(probe_language_support("python gui.py", root, "macos"))
+            popen.assert_not_called()
+
+    def test_process_manager_passes_selected_language_to_supported_process(self):
+        events = []
+        command = f'{sys.executable} -c "import sys; print(sys.argv[-2:])"'
+        manager = ProcessManager(Path.cwd(), lambda *args: events.append(args), lang="en")
+        manager.runtime = PlatformRuntime("posix")
+        item = manager.add(ProcessSpec("language-aware", command, supports_lang=True))
+
+        manager.start(item)
+        deadline = time.time() + 3
+        while item.running and time.time() < deadline:
+            manager.drain_events()
+            time.sleep(0.02)
+        manager.drain_events()
+
+        self.assertEqual(item.return_code, 0)
+        self.assertTrue(any("--lang" in line and "en" in line for line in item.lines))
+
+    def test_user_config_path_is_outside_macos_app_bundle(self):
+        self.assertEqual(
+            user_config_path("macos"),
+            Path.home() / "Library" / "Application Support" / "IntegratedTerm" / "processes.json",
+        )
+
     def test_config_path_maps_saved_user_home(self):
         resolved = resolve_config_path("/Users/old-user/project", "ubuntu")
         self.assertEqual(resolved, Path.home() / "project")
@@ -132,6 +244,32 @@ class ProcessManagerTests(unittest.TestCase):
         self.assertTrue(any(event[0] == "line" and "123" in (event[2] or "") for event in events))
         self.assertTrue(item.lines)
         self.assertTrue(any(event[0] == "exit" for event in events))
+
+    def test_exit_event_does_not_wait_for_descendant_stdout(self):
+        import tempfile
+
+        events = []
+        with tempfile.TemporaryDirectory() as directory:
+            manager = ProcessManager(Path(directory), lambda *args: events.append((time.monotonic(), *args)))
+            code = (
+                "import subprocess,sys; "
+                "subprocess.Popen([sys.executable,'-c','import time; time.sleep(1)']); "
+                "print('parent done')"
+            )
+            manager.runtime.translated_command_args = lambda _command: [sys.executable, "-c", code]
+            manager.runtime.popen_kwargs = lambda: {}
+            item = manager.add(ProcessSpec("parent", "ignored"))
+            started = time.monotonic()
+
+            manager.start(item)
+            deadline = started + 0.5
+            while time.monotonic() < deadline and not any(event[1] == "exit" for event in events):
+                manager.drain_events()
+                time.sleep(0.01)
+
+            exit_events = [event for event in events if event[1] == "exit"]
+            self.assertTrue(exit_events)
+            self.assertLess(exit_events[0][0] - started, 0.5)
 
     def test_stop_terminates_process(self):
         manager = ProcessManager(Path.cwd(), lambda *_args: None)
@@ -262,6 +400,21 @@ class ProcessManagerTests(unittest.TestCase):
         self.assertTrue(ungrouped.locked)
         self.assertEqual([item.spec.name for item in ungrouped.items], ["a", "b"])
 
+    def test_parse_groups_preserves_language_support_setting(self):
+        app = object.__new__(App)
+        groups = app._parse_groups({
+            "groups": [{
+                "name": "tools",
+                "processes": [{
+                    "name": "language-aware",
+                    "command": "echo ok",
+                    "supports_lang": True,
+                    "lsl_streams": [{}],
+                }],
+            }],
+        })
+        self.assertTrue(groups[0].items[0].spec.supports_lang)
+
     def test_group_open_close_events_are_ignored_during_tree_refresh(self):
         app = object.__new__(App)
         app._refreshing_tree = True
@@ -271,6 +424,43 @@ class ProcessManagerTests(unittest.TestCase):
         app._group_opened()
         app._group_closed()
         self.assertTrue(group.expanded)
+
+    def test_drag_requires_deliberate_pointer_movement(self):
+        manager = ProcessManager(Path.cwd(), lambda *_args: None)
+        item = manager.add(ProcessSpec("kept", "echo kept"))
+        item._tree_id = "item"
+
+        class FakeTree:
+            def identify_row(self, _y):
+                return "item"
+
+        event = type("Event", (), {"x": 10, "y": 10})()
+        app = object.__new__(App)
+        app.tree = FakeTree()
+        app.manager = manager
+        app._drag_group = None
+        app._drag_item = None
+        app._drag_origin = None
+        app._drag_active = False
+        app._auto_scroll_drag = lambda _y: self.fail("small pointer movement must not start dragging")
+
+        app._drag_start(event)
+        app._drag_motion(type("Event", (), {"x": 14, "y": 14})())
+
+        self.assertFalse(app._drag_active)
+        self.assertEqual(manager.items, [item])
+
+    def test_stopping_state_is_visible_immediately(self):
+        app = object.__new__(App)
+        app.lang = "zh"
+        item = ManagedProcess(ProcessSpec("demo", "echo demo"), stopping=True)
+        self.assertEqual(app._item_state_text(item), "正在终止")
+
+    def test_exited_state_text_does_not_require_status_message_placeholders(self):
+        app = object.__new__(App)
+        app.lang = "zh"
+        item = ManagedProcess(ProcessSpec("demo", "echo demo"), return_code=1)
+        self.assertEqual(app._item_state_text(item), "已退出 1")
 
     def test_delayed_close_event_uses_current_tree_state(self):
         group = type("Group", (), {"expanded": True, "_tree_id": "group"})()

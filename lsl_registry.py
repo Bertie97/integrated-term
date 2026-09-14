@@ -140,14 +140,24 @@ def _module_file(module: str, repo: Path) -> Path | None:
     return None
 
 
+def _module_entry_file(module: str, repo: Path) -> Path | None:
+    relative = Path(*module.split("."))
+    for base in (repo, repo / "src"):
+        for candidate in (base / relative.with_suffix(".py"), base / relative / "__main__.py"):
+            if candidate.is_file():
+                return candidate
+    return None
+
+
 def _entry_file(command: str, repo: Path) -> Path | None:
-    file_match = re.search(r"\b(?:python|python3|mjpython)\s+([^\s]+\.py)\b", command)
+    python = r"(?:[^\s;&|]+[\\/])?(?:python(?:3(?:\.\d+)?)?|mjpython)(?:\.exe)?"
+    file_match = re.search(rf"(?<![\w.-]){python}\s+([^\s]+\.py)\b", command)
     if file_match:
         candidate = repo / file_match.group(1).strip("'\"")
         return candidate if candidate.is_file() else None
-    module_match = re.search(r"\b(?:python|python3|mjpython)\s+-m\s+([A-Za-z_][\w.]*)", command)
+    module_match = re.search(rf"(?<![\w.-]){python}\s+-m\s+([A-Za-z_][\w.]*)", command)
     if module_match:
-        return _module_file(module_match.group(1), repo)
+        return _module_entry_file(module_match.group(1), repo)
     try:
         project_text = (repo / "pyproject.toml").read_text(encoding="utf-8")
     except OSError:
@@ -206,6 +216,43 @@ def _reachable_python(entry: Path, repo: Path) -> dict[Path, set[str] | None]:
             if candidate is not None:
                 pending.append((candidate, symbols))
     return found
+
+
+def scan_python_cli_option(command: str, root_dir: Path, option: str) -> bool:
+    """Statically detect a CLI option without executing the configured command."""
+    command = _current_command(command).replace("\\\n", " ")
+    repo = _repo_from_command(command, root_dir)
+    if not repo.is_dir():
+        return False
+    entry = _entry_file(command, repo)
+    if entry is None or entry.suffix.lower() not in {".py", ".pyi"}:
+        return False
+    for source, selected_symbols in _reachable_python(entry, repo).items():
+        try:
+            tree = ast.parse(source.read_text(encoding="utf-8", errors="ignore"))
+        except (OSError, SyntaxError):
+            continue
+        roots = [
+            node
+            for node in tree.body
+            if selected_symbols is None or getattr(node, "name", None) in selected_symbols
+        ]
+        for node in (child for root in roots for child in ast.walk(root)):
+            if not isinstance(node, ast.Call):
+                continue
+            call_name = (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else node.func.id
+                if isinstance(node.func, ast.Name)
+                else ""
+            )
+            if call_name not in {"add_argument", "option", "Option"}:
+                continue
+            values = [*node.args, *(keyword.value for keyword in node.keywords)]
+            if any(isinstance(value, ast.Constant) and value.value == option for value in values):
+                return True
+    return False
 
 
 def scan_lsl_streams(command: str, root_dir: Path) -> list[dict[str, Any]]:

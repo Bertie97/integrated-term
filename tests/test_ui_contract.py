@@ -27,6 +27,16 @@ class UiContractTests(unittest.TestCase):
         self.assertIn("pre-rendered Font Awesome glyph", self.source)
         self.assertIn("class RoundedPanel", self.source)
 
+    def test_process_language_switch_toggle_is_visible_in_configuration_dialog(self):
+        self.assertIn('"supports_lang": "适配中英文切换（自动添加 --lang ch/en）"', self.source)
+        self.assertIn("class LanguageToggle(tk.Canvas)", self.source)
+        self.assertIn("self.supports_lang_toggle = LanguageToggle", self.source)
+        self.assertNotIn("self.supports_lang_check = ttk.Checkbutton", self.source)
+        self.assertIn('language_row = tk.Frame(body, bg="#f4f7fb")', self.source)
+        self.assertIn('self.supports_lang_toggle.pack(side="left", padx=(0, 10))', self.source)
+        self.assertNotIn("_detect_language_support", self.source)
+        self.assertIn('self.tree.heading("gui", text=self._t("gui"), anchor="center")', self.source)
+
     def test_font_awesome_assets_load_as_visible_tk_images(self):
         spec = importlib.util.spec_from_file_location("integrated_term_app", APP)
         module = importlib.util.module_from_spec(spec)
@@ -41,7 +51,7 @@ class UiContractTests(unittest.TestCase):
             button = module.RoundedButton(root, text="", command=lambda: None, width=38, icon="pin")
             root.update_idletasks()
             image = button._icon_images[("pin", "dark")]
-            self.assertEqual((image.width(), image.height()), (14, 14))
+            self.assertEqual((image.width(), image.height()), (18, 18))
             opaque_pixels = sum(
                 not int(root.tk.call(str(image), "transparency", "get", x, y))
                 for y in range(image.height())
@@ -105,7 +115,9 @@ class UiContractTests(unittest.TestCase):
             view.manager = module.ProcessManager(PROJECT_DIR, lambda *_args: None)
             group = view.manager.add_group("collapsed")
             group.expanded = False
-            view.manager.add(module.ProcessSpec("kept", "echo kept"), group)
+            first = view.manager.add(module.ProcessSpec("first", "echo first"), group)
+            middle = view.manager.add(module.ProcessSpec("middle", "echo middle"), group)
+            last = view.manager.add(module.ProcessSpec("last", "echo last"), group)
             view.selected = None
             view.selected_items = []
             view.selected_group = None
@@ -117,7 +129,12 @@ class UiContractTests(unittest.TestCase):
             view._refresh_tree()
 
             self.assertFalse(bool(view.tree.item(group._tree_id, "open")))
-            self.assertEqual(len(view.tree.get_children(group._tree_id)), 1)
+            self.assertEqual(len(view.tree.get_children(group._tree_id)), 3)
+            row_ids = tuple(view.tree.get_children(group._tree_id))
+            middle.return_code = 1
+            view._refresh_tree()
+            self.assertEqual(tuple(view.tree.get_children(group._tree_id)), row_ids)
+            self.assertEqual(len(view.tree.get_children(group._tree_id)), 3)
         finally:
             root.destroy()
 
@@ -136,7 +153,7 @@ class UiContractTests(unittest.TestCase):
         self.assertTrue({"_toggle_process_list_window", "_close_process_list_window", "_refresh_process_list_window"} <= methods)
 
     def test_tree_groups_have_leading_spacing_and_shared_rounded_panel(self):
-        self.assertGreaterEqual(self.source.count('text=f"    {marker}  {group.name}"'), 2)
+        self.assertGreaterEqual(self.source.count('text=f"    {marker}  {self._group_name(group)}"'), 2)
         self.assertIn("panel = RoundedPanel(window, padding=10)", self.source)
         self.assertIn("left = RoundedPanel(split)", self.source)
         self.assertNotIn('text="＋ 新建分组"', self.source)
