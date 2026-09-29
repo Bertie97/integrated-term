@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "commit": "pending",
+  "reviewed_at": "2026-09-30T00:28:19+08:00",
+  "items": [
+    {
+      "item": "改了什么",
+      "answer": "基于 git status、git diff 和实际文件内容：修改 README.md、app.py、三个 PyInstaller spec、两个测试文件和 version.py；新增 branding.py 与 assets/active-intelligence-mark@2x.png。主要新增宏引用/递归展开、参数覆盖与删除、sleep/timeout 工作流、工作流双列表/纯文本编辑、循环/缺失引用校验、启动时错误处理、窗口聚焦重试、品牌页脚和 macOS 版本元数据；测试新增对应宏/工作流/UI 合同覆盖。另有未跟踪 build/（17 个文件，约 8.2M）和 dist/（822 个文件，约 72M，含约 12.95M ZIP）打包产物。"
+    },
+    {
+      "item": "为什么改",
+      "answer": "README 和新增测试明确表明目标是支持可复用进程宏与带等待项的工作流配置，并提供可编辑的解析后命令；app.py 实现该功能及配置校验、窗口焦点行为；branding.py/PNG 和 spec 改动用于加入主动科技品牌资源；version.py 与 macOS Info.plist 改动用于发布版本/构建号（当前 1.1.3(38)）。以上目的均来自变更内容，未推断未写入代码的业务动机。"
+    },
+    {
+      "item": "如何验证",
+      "answer": "已执行并通过：python3 -m unittest -q tests/test_process_manager.py tests/test_ui_contract.py（64 tests，OK）；python3 -m compileall -q app.py branding.py version.py tests（exit 0）；git diff --check（exit 0）；只读宏参数边界检查显示 --threshold 覆盖结果正确。未通过/未执行：python3 -m pytest -q 因环境未安装 pytest（No module named pytest）；默认 python3 -m unittest discover -v 发现 0 tests（测试目录未被默认 discover 识别），随后已用显式模块路径完成验证；未执行真实 GUI 手工验收、PyInstaller 重打包、跨平台构建或安装包运行验收。"
+    },
+    {
+      "item": "是否涉及删除",
+      "answer": "代码 diff 未删除源文件、配置条目或测试文件；仅有新增/修改。未跟踪 build/dist 是生成物，不应作为删除或提交内容处理。"
+    },
+    {
+      "item": "是否涉及迁移",
+      "answer": "未发现文件迁移、模块路径迁移或数据迁移脚本。配置 schema 增加 workflow 字段，并在读取旧配置时由命令内容推导缺省值，属于向后兼容读取逻辑，不是独立迁移。"
+    },
+    {
+      "item": "是否涉及配置",
+      "answer": "涉及：ProcessSpec/导入导出 JSON 增加 workflow 字段；新增宏引用和等待语法；三个打包 spec 增加品牌资源，macOS spec 从 version.py 读取版本/构建号写入 Info.plist。未改动 processes.json 或本机 processes.local.json。"
+    },
+    {
+      "item": "是否涉及权限",
+      "answer": "未见权限位、ACL、sudo、用户/角色或系统授权配置改动。运行时仍通过 subprocess 启动命令，新增功能未改变权限模型；真实权限行为未做跨平台运行验证。"
+    },
+    {
+      "item": "是否涉及数据",
+      "answer": "涉及配置数据格式：工作流命令和 workflow 布尔字段会写入用户配置/导出 JSON；旧配置读取有兼容推导。未新增数据库、数据集或个人数据；未发现 token、密钥或密码。"
+    },
+    {
+      "item": "是否涉及模型",
+      "answer": "不涉及机器学习模型、模型权重、推理逻辑或训练数据。"
+    },
+    {
+      "item": "是否涉及大文件",
+      "answer": "涉及且存在提交风险：未跟踪 dist/ 822 个文件约 72M、build/ 17 个文件约 8.2M，包含 macOS app/framework、动态库、PyInstaller TOC/PKG/PYZ 和约 12.95M ZIP；这些是本机打包产物/缓存，不应纳入提交。新增品牌 PNG 仅 7,542 bytes。当前 .gitignore 未忽略 build/ 或 dist/，建议在提交前清理或补充忽略规则，但本次按要求未修改文件。"
+    },
+    {
+      "item": "是否有兼容性风险",
+      "answer": "有，状态为 tested-with-warning：宏参数覆盖通过单元测试，但实现用 shell 文本正则重写参数，复杂 shell 引号、重复参数、等号形式和命令行语义未做完整跨 shell 验证；sleep 命令、窗口聚焦和 PyInstaller 资源路径依赖目标平台，未做 Windows/Linux/macOS 实机打包验收；新增 workflow 字段对旧配置有读取兼容，但尚未验证旧版本安装包升级路径。另有未忽略构建产物污染提交的高风险。"
+    }
+  ],
+  "notes": ""
+}

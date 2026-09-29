@@ -17,17 +17,133 @@ from app import (
     clean_terminal_text,
     command_with_language,
     child_environment,
+    expand_macro_command,
+    is_workflow_command,
+    macro_references,
+    parse_duration,
+    parse_macro_line,
+    sleep_command,
+    validate_macro_cycles,
     detect_platform,
     probe_language_support,
     resolve_config_path,
     select_platform_command,
     translate_command,
     user_config_path,
+    workflow_plain_text,
 )
 from lsl_registry import read_registry, register_process, registry_path, scan_lsl_streams
 
 
 class ProcessManagerTests(unittest.TestCase):
+    def test_macro_line_parsing_and_workflow_detection(self):
+        self.assertEqual(parse_macro_line("[Base](--argv demo **debug)"), ("Base", "--argv demo **debug"))
+        self.assertEqual(macro_references("[Base]()\nsleep 2\n"), ["Base"])
+        self.assertTrue(is_workflow_command("[Base]()\nsleep 2\n"))
+        self.assertFalse(is_workflow_command("echo [Base]()"))
+
+    def test_sleep_duration_supports_decimal_and_combined_units(self):
+        self.assertAlmostEqual(parse_duration("1h0.3s"), 3600.3)
+        self.assertAlmostEqual(parse_duration("250ms2m"), 120.25)
+        self.assertEqual(sleep_command("1s", "macos"), "sleep 1")
+        with self.assertRaises(ValueError):
+            parse_duration("1x")
+        self.assertFalse(is_workflow_command("[sleep](1x)"))
+
+    def test_sleep_macro_expands_to_shell_wait(self):
+        self.assertEqual(expand_macro_command("[sleep](1h0.3s)", [], Path("/tmp/work"), "macos"), "sleep 3600.3")
+
+    def test_macro_expansion_replaces_and_removes_arguments(self):
+        base = ProcessSpec(
+            "Base",
+            "python main.py -x old -k discard --argv old --debug yes --keep ok",
+        )
+        result = expand_macro_command(
+            "[Base](-x new *k --argv updated **debug -n added --extra value)",
+            [base],
+            Path("/tmp/work"),
+        )
+        self.assertNotIn("cd /tmp/work", result)
+        self.assertIn("-x new", result)
+        self.assertNotIn("-k discard", result)
+        self.assertIn("--argv updated", result)
+        self.assertNotIn("--debug", result)
+        self.assertIn("--keep ok", result)
+        self.assertIn("-n added", result)
+        self.assertIn("--extra value", result)
+
+    def test_macro_argument_syntax_is_independent_from_sleep_duration(self):
+        base = ProcessSpec("Base", "python main.py")
+        self.assertTrue(is_workflow_command("[Base](-x 1 --name demo *q **verbose)"))
+        self.assertIn(
+            "-x 1 --name demo",
+            expand_macro_command("[Base](-x 1 --name demo)", [base], Path("/tmp/work")),
+        )
+        with self.assertRaisesRegex(ValueError, "缺少参数值"):
+            expand_macro_command("[Base](-x)", [base], Path("/tmp/work"))
+        with self.assertRaises(ValueError):
+            expand_macro_command("[sleep](-x 1)", [], Path("/tmp/work"))
+
+    def test_macro_long_options_may_be_value_less_flags(self):
+        base = ProcessSpec("Base", "python main.py --viewer --mode old")
+        result = expand_macro_command(
+            "[Base](--arm RM65 --viewer --mode new)",
+            [base],
+            Path("/tmp/work"),
+        )
+        self.assertIn("--arm RM65", result)
+        self.assertIn("--viewer", result)
+        self.assertIn("--mode new", result)
+        self.assertEqual(result.split().count("--viewer"), 1)
+
+    def test_macro_long_flag_can_be_appended_or_removed(self):
+        base = ProcessSpec("Base", "python main.py")
+        self.assertEqual(
+            expand_macro_command("[Base](--viewer)", [base], Path("/tmp/work")),
+            "python main.py --viewer",
+        )
+        self.assertEqual(
+            expand_macro_command("[Base](--threshold -1)", [base], Path("/tmp/work")),
+            "python main.py --threshold -1",
+        )
+
+    def test_workflow_plain_text_expands_items_with_blank_lines_between_processes(self):
+        first = ProcessSpec("First", "python first.py\npython follow_up.py")
+        second = ProcessSpec("Second", "python second.py --mode old")
+        result = workflow_plain_text(
+            "[First]()\n[Second](--mode new)\n[sleep](500ms)",
+            [first, second],
+            Path("/tmp/work"),
+            "macos",
+        )
+        self.assertEqual(
+            result,
+            "python first.py\npython follow_up.py\n\n"
+            "python second.py --mode new\n\nsleep 0.5",
+        )
+
+    def test_macro_expansion_keeps_only_the_referenced_process_working_directory(self):
+        child = ProcessSpec("Child", "cd child-workdir\npython child.py")
+        result = expand_macro_command("[Child]()", [child], Path("/tmp/work"), "macos")
+        self.assertEqual(result, "cd child-workdir\npython child.py")
+
+    def test_workflow_plain_text_selects_the_current_platform_command(self):
+        platform_process = ProcessSpec(
+            "Platform",
+            "[windows]\necho windows\n[macos]\necho mac\n[default]\necho fallback",
+        )
+        result = workflow_plain_text("[Platform]()", [platform_process], Path("/tmp/work"), "macos")
+        self.assertIn("echo mac", result)
+        self.assertNotIn("echo windows", result)
+        self.assertNotIn("[macos]", result)
+
+    def test_macro_cycle_validation_rejects_cycles_and_missing_references(self):
+        first = ProcessSpec("First", "[Second]()")
+        second = ProcessSpec("Second", "[First]()")
+        with self.assertRaisesRegex(ValueError, "循环引用"):
+            validate_macro_cycles([first, second])
+        with self.assertRaisesRegex(ValueError, "不存在"):
+            validate_macro_cycles([ProcessSpec("Only", "[Missing]()")])
     def test_scan_lsl_streams_finds_stream_identity_and_deduplicates(self):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
@@ -455,6 +571,23 @@ class ProcessManagerTests(unittest.TestCase):
         app.lang = "zh"
         item = ManagedProcess(ProcessSpec("demo", "echo demo"), stopping=True)
         self.assertEqual(app._item_state_text(item), "正在终止")
+
+    def test_manager_start_event_requests_focus_for_selected_window(self):
+        app = object.__new__(App)
+        class RunningProcess:
+            pid = 123
+            def poll(self):
+                return None
+        item = ManagedProcess(ProcessSpec("demo", "echo demo"), process=RunningProcess())
+        app.selected = item
+        app.selected_items = [item]
+        app.window_controller = type("Controller", (), {"set_visible": lambda self, *args, **kwargs: setattr(self, "request", (args, kwargs))})()
+        app._desired_gui_visibility = lambda candidate: candidate is item
+        app.after = lambda _delay, callback: None
+        app.after_idle = lambda callback: None
+        app._refresh_tree = lambda: None
+        app._manager_event("changed", item, None)
+        self.assertEqual(app.window_controller.request[1]["focus"], True)
 
     def test_exited_state_text_does_not_require_status_message_placeholders(self):
         app = object.__new__(App)

@@ -2,6 +2,10 @@
 from pathlib import Path
 
 project = Path(SPECPATH).resolve().parents[1]
+version_scope = {}
+exec((project / "version.py").read_text(encoding="utf-8"), version_scope)
+version = ".".join(map(str, version_scope["VERSION"]))
+build = str(version_scope["BUILD"])
 
 a = Analysis(
     [str(project / "app.py")],
@@ -10,6 +14,7 @@ a = Analysis(
     datas=[
         (str(project / "processes.json"), "."),
         (str(project / "assets" / "icons" / "fa"), "assets/icons/fa"),
+        (str(project / "assets" / "active-intelligence-mark@2x.png"), "assets"),
         (str(project / "assets" / "integrated-term-icon-opaque.png"), "assets"),
     ],
     hiddenimports=["tkinter", "_tkinter"],
@@ -47,5 +52,9 @@ app = BUNDLE(
     name="集成终端控制台.app",
     icon=str(project / "assets" / "integrated-term-icon-opaque.png"),
     bundle_identifier="com.bci.integrated-term",
-    info_plist={"NSHighResolutionCapable": True},
+    info_plist={
+        "NSHighResolutionCapable": True,
+        "CFBundleShortVersionString": version,
+        "CFBundleVersion": build,
+    },
 )

@@ -9,6 +9,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(project / "processes.json"), "."),
+        (str(project / "assets" / "active-intelligence-mark@2x.png"), "assets"),
         (str(project / "assets" / "integrated-term-icon.ico"), "assets"),
         (str(project / "assets" / "icons" / "fa"), "assets/icons/fa"),
     ],

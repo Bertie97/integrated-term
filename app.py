@@ -24,7 +24,7 @@ import ctypes
 import ctypes.wintypes
 from dataclasses import dataclass, field
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, font as tkfont, messagebox, simpledialog, ttk
 
 from lsl_registry import (
     build_entry,
@@ -34,6 +34,7 @@ from lsl_registry import (
     scan_lsl_streams,
     unregister_process,
 )
+from branding import horizontal_brand
 from version import VERSION_STRING
 
 
@@ -69,7 +70,7 @@ UI_TEXT = {
     "zh": {
         "app_title": "集成终端控制台", "integrated": "集成终端", "console": "控制台",
         "set_root": "设置根目录", "import_config": "导入配置", "export_config": "保存配置",
-        "process_list": "进程列表", "add_process": "添加进程", "new_group": "新建分组",
+        "process_list": "进程列表", "add_process": "添加进程", "add_workflow": "添加工作流", "new_group": "新建分组",
         "name": "名称", "gui": "界面", "state": "状态", "output": "终端输出",
         "start": "启动", "stop": "终止", "start_group": "启动分组", "stop_group": "终止分组",
         "start_all": "全部启动", "stop_all": "全部终止", "restart": "重启", "restart_all": "全部重启",
@@ -89,12 +90,12 @@ UI_TEXT = {
         "import_failed": "导入失败", "save_failed": "保存失败", "invalid_config": "配置文件格式无效：\n{error}",
         "cannot_save": "无法保存配置文件：\n{error}", "imported": "已导入 {items} 个进程、{groups} 个分组",
         "saved": "配置已保存：{target}", "root_changed": "根目录：{root}", "exited": "{name} 已退出，返回码：{code}", "exited_state": "已退出",
-        "json_config": "JSON 配置", "all_files": "所有文件", "terminal_output": "终端输出",
+        "json_config": "JSON 配置", "all_files": "所有文件", "terminal_output": "终端输出", "workflow_title": "工作流配置", "workflow_available": "可用项目（双击添加）", "workflow_item": "当前工作流", "terminal_commands": "实际终端命令", "add_item": "添加项目", "plain_text_edit": "以纯文本编辑", "workflow_edit": "以工作流编辑", "remove_item": "删除子进程", "sleep_item": "等待 {seconds} 秒", "sleep_seconds": "等待秒数", "invalid_workflow": "工作流至少需要一个项目。",
     },
     "en": {
         "app_title": "Integrated Terminal Cockpit", "integrated": "Integrated Terminal", "console": "Cockpit",
         "set_root": "Set Root", "import_config": "Import Config", "export_config": "Save Config",
-        "process_list": "Processes", "add_process": "Add Process", "new_group": "New Group",
+        "process_list": "Processes", "add_process": "Add Process", "add_workflow": "Add Workflow", "new_group": "New Group",
         "name": "Name", "gui": "GUI", "state": "State", "output": "Terminal Output",
         "start": "Start", "stop": "Stop", "start_group": "Start Group", "stop_group": "Stop Group",
         "start_all": "Start All", "stop_all": "Stop All", "restart": "Restart", "restart_all": "Restart All",
@@ -114,7 +115,7 @@ UI_TEXT = {
         "import_failed": "Import Failed", "save_failed": "Save Failed", "invalid_config": "Invalid config file:\n{error}",
         "cannot_save": "Could not save config file:\n{error}", "imported": "Imported {items} process(es), {groups} group(s)",
         "saved": "Config saved: {target}", "root_changed": "Root: {root}", "exited": "{name} exited, return code: {code}", "exited_state": "Exited",
-        "json_config": "JSON config", "all_files": "All files", "terminal_output": "Terminal Output",
+        "json_config": "JSON config", "all_files": "All files", "terminal_output": "Terminal Output", "workflow_title": "Workflow Configuration", "workflow_available": "Available (double-click to add)", "workflow_item": "Current Workflow", "terminal_commands": "Resolved Terminal Commands", "add_item": "Add Item", "plain_text_edit": "Edit as Plain Text", "workflow_edit": "Edit as Workflow", "remove_item": "Remove Child", "sleep_item": "Wait {seconds} seconds", "sleep_seconds": "Wait seconds", "invalid_workflow": "A workflow needs at least one item.",
     },
 }
 
@@ -187,6 +188,198 @@ def command_with_language(command: str, lang: str, target: str | None = None) ->
     if re.search(r"(?<!\S)--lang(?:=|\s+)\S+", translated):
         return re.sub(r"(?<!\S)--lang(?:=|\s+)\S+", f"--lang {value}", translated)
     return f"{translated.rstrip()} --lang {value}".strip()
+
+
+MACRO_LINE = re.compile(r"^\s*\[([^\]]+)\]\((.*)\)\s*$")
+SLEEP_LINE = re.compile(r"^\s*(?:sleep|timeout|Start-Sleep)\s+\S+(?:\s+.*)?$", re.IGNORECASE)
+SLEEP_MACRO_TITLE = "sleep"
+DURATION_TOKEN = re.compile(r"(?P<value>\d+(?:\.\d+)?)(?P<unit>ms|s|m|h)", re.IGNORECASE)
+
+
+def parse_macro_line(line: str) -> tuple[str, str] | None:
+    """Parse one process reference line: ``[Title](--argv value **argu)``."""
+    match = MACRO_LINE.match(line)
+    if not match:
+        return None
+    title, arguments = match.groups()
+    if not title.strip():
+        return None
+    return title.strip(), arguments.strip()
+
+
+def macro_references(command: str) -> list[str]:
+    return [parsed[0] for line in command.splitlines() if (parsed := parse_macro_line(line)) and parsed[0].lower() != SLEEP_MACRO_TITLE]
+
+
+def parse_duration(value: str) -> float:
+    """Parse a duration such as ``1h0.3s`` into seconds."""
+    text = value.strip()
+    if re.fullmatch(r"\d+(?:\.\d+)?", text):
+        return float(text)
+    matches = list(DURATION_TOKEN.finditer(text))
+    if not matches or "".join(match.group(0) for match in matches).lower() != text.lower():
+        raise ValueError(f"等待时间格式无效：{value}")
+    scale = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
+    return sum(float(match.group("value")) * scale[match.group("unit").lower()] for match in matches)
+
+
+def sleep_command(value: str, target: str | None = None) -> str:
+    seconds = parse_duration(value)
+    if (target or detect_platform()) == "windows":
+        milliseconds = max(0, round(seconds * 1000))
+        return f'powershell -NoProfile -Command "Start-Sleep -Milliseconds {milliseconds}"'
+    return f"sleep {seconds:g}"
+
+
+def _apply_macro_arguments(command: str, arguments: str) -> str:
+    """Apply short/long option overrides and removals to a referenced command."""
+    try:
+        tokens = shlex.split(arguments)
+    except ValueError as exc:
+        raise ValueError(f"宏参数格式无效：{arguments}") from exc
+    replacements: dict[str, str] = {}
+    flags: set[str] = set()
+    removals: set[str] = set()
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if re.fullmatch(r"\*\*[A-Za-z0-9][A-Za-z0-9_-]*", token):
+            removals.add(f"--{token[2:]}")
+            index += 1
+            continue
+        if re.fullmatch(r"\*[A-Za-z0-9]", token):
+            removals.add(f"-{token[1:]}")
+            index += 1
+            continue
+        if re.fullmatch(r"--[A-Za-z0-9][A-Za-z0-9_-]*", token):
+            next_token = tokens[index + 1] if index + 1 < len(tokens) else None
+            option_like = next_token is not None and (
+                re.fullmatch(r"--[A-Za-z0-9][A-Za-z0-9_-]*", next_token)
+                or re.fullmatch(r"-[A-Za-z]", next_token)
+                or re.fullmatch(r"\*\*?[A-Za-z0-9][A-Za-z0-9_-]*", next_token)
+            )
+            if next_token is None or option_like:
+                flags.add(token)
+                index += 1
+            else:
+                replacements[token] = next_token
+                index += 2
+            continue
+        if re.fullmatch(r"-[A-Za-z0-9]", token):
+            if index + 1 >= len(tokens):
+                raise ValueError(f"宏参数缺少参数值：{token}")
+            replacements[token] = tokens[index + 1]
+            index += 2
+            continue
+        raise ValueError(f"宏参数必须是 -x value、--name value、*x 或 **name：{token}")
+
+    result = command
+    shell_value = r"(?:'[^']*'|\"[^\"]*\"|(?!(?:--[A-Za-z0-9]|-[A-Za-z]))[^\s\\]+)"
+    def option_pattern(option: str) -> str:
+        return rf"(?<!\S){re.escape(option)}(?=$|[\t =])(?:={shell_value}|[\t ]+{shell_value})?"
+
+    for option in removals:
+        result = re.sub(option_pattern(option), "", result)
+    for option in flags:
+        pattern = option_pattern(option)
+        result, count = re.subn(pattern, option, result)
+        if count == 0:
+            result = f"{result.rstrip()} {option}"
+    for option, value in replacements.items():
+        pattern = option_pattern(option)
+        result, count = re.subn(pattern, f"{option} {shlex.quote(value)}", result)
+        if count == 0:
+            result = f"{result.rstrip()} {option} {shlex.quote(value)}"
+    return result.strip()
+
+
+def is_workflow_command(command: str) -> bool:
+    """A workflow contains only references, sleep commands, and blank lines."""
+    lines = [line.strip() for line in command.splitlines() if line.strip()]
+    def valid_line(line: str) -> bool:
+        parsed = parse_macro_line(line)
+        if parsed:
+            if parsed[0].lower() != SLEEP_MACRO_TITLE:
+                return True
+            try:
+                return parse_duration(parsed[1]) >= 0
+            except ValueError:
+                return False
+        return bool(SLEEP_LINE.match(line))
+    return bool(lines) and all(valid_line(line) for line in lines)
+
+
+def _spec_lookup(specs) -> dict[str, object]:
+    lookup: dict[str, object] = {}
+    for spec in specs:
+        names = {spec.name, spec.name_zh, spec.name_en}
+        for name in names:
+            if name:
+                lookup.setdefault(name.strip(), spec)
+    return lookup
+
+
+def validate_macro_cycles(specs) -> None:
+    """Validate references and reject cycles before a configuration is saved."""
+    lookup = _spec_lookup(specs)
+    graph: dict[int, list[object]] = {}
+    for spec in specs:
+        refs = macro_references(spec.command)
+        missing = [name for name in refs if name not in lookup]
+        if missing:
+            raise ValueError(f"宏引用不存在：{', '.join(missing)}")
+        graph[id(spec)] = [lookup[name] for name in refs]
+    visiting: set[int] = set()
+    visited: set[int] = set()
+
+    def visit(spec):
+        identity = id(spec)
+        if identity in visiting:
+            raise ValueError(f"检测到循环引用：{spec.name}")
+        if identity in visited:
+            return
+        visiting.add(identity)
+        for child in graph.get(identity, []):
+            visit(child)
+        visiting.remove(identity)
+        visited.add(identity)
+
+    for spec in specs:
+        visit(spec)
+
+
+def expand_macro_command(command: str, specs, cwd: Path, target: str | None = None, _stack: tuple[object, ...] = ()) -> str:
+    """Expand macro lines recursively and reset each expansion to the caller cwd."""
+    lookup = _spec_lookup(specs)
+    output: list[str] = []
+    for line in command.splitlines():
+        parsed = parse_macro_line(line)
+        if not parsed:
+            output.append(line)
+            continue
+        title, arguments = parsed
+        if title.lower() == SLEEP_MACRO_TITLE:
+            output.append(sleep_command(arguments, target))
+            continue
+        referenced = lookup.get(title)
+        if referenced is None:
+            raise ValueError(f"宏引用不存在：{title}")
+        if referenced in _stack:
+            raise ValueError(f"检测到循环引用：{title}")
+        expanded = expand_macro_command(referenced.command, specs, cwd, target, (*_stack, referenced))
+        expanded = _apply_macro_arguments(expanded, arguments)
+        output.append(expanded)
+    return "\n".join(output)
+
+
+def workflow_plain_text(command: str, specs, cwd: Path, target: str | None = None) -> str:
+    """Expand workflow items into editable command blocks separated by blank lines."""
+    blocks = [
+        translate_command(expand_macro_command(line, specs, cwd, target), target)
+        for line in command.splitlines()
+        if line.strip()
+    ]
+    return "\n\n".join(block for block in blocks if block)
 
 
 class PlatformRuntime:
@@ -466,6 +659,7 @@ class ProcessSpec:
     name_zh: str | None = None
     name_en: str | None = None
     supports_lang: bool | None = None
+    workflow: bool | None = None
 
     def localized_name(self, lang: str) -> str:
         """Return the requested process name, falling back across languages."""
@@ -726,7 +920,13 @@ class ProcessManager:
         if item.running:
             return
         self.root_dir.mkdir(parents=True, exist_ok=True)
-        command = command_with_language(item.spec.command, self.lang, self.runtime.target) if item.spec.supports_lang else translate_command(item.spec.command, self.runtime.target)
+        try:
+            expanded = expand_macro_command(item.spec.command, [candidate.spec for candidate in self.items], self.root_dir, self.runtime.target)
+            command = command_with_language(expanded, self.lang, self.runtime.target) if item.spec.supports_lang else translate_command(expanded, self.runtime.target)
+        except ValueError as exc:
+            item.lines.append(f"[launch error] {exc}")
+            self.on_event("changed", item, None)
+            return
         try:
             item.process = subprocess.Popen(
                 self.runtime.translated_command_args(command),
@@ -962,6 +1162,197 @@ class LanguageToggle(tk.Canvas):
             self.create_oval(0, 0, 44, 24, outline="#75b7ff", width=1)
 
 
+class WorkflowDialog(tk.Toplevel):
+    def __init__(self, parent, specs, initial: ProcessSpec | None = None, lang: str = "zh", root_dir: Path | None = None, target: str | None = None):
+        super().__init__(parent)
+        self.lang = lang
+        self._t = lambda key, **kwargs: _text(self.lang, key, **kwargs)
+        self.result: ProcessSpec | None = None
+        self.specs = list(specs)
+        self.root_dir = root_dir or Path.cwd()
+        self.target = target
+        self.plain_text = None
+        self.plain_text_mode = False
+        self._plain_text_stale = True
+        self.title(self._t("workflow_title"))
+        self.transient(parent)
+        self.grab_set()
+        body = ttk.Frame(self, padding=16)
+        body.grid(sticky="nsew")
+        ttk.Label(body, text=self._t("process_name")).grid(row=0, column=0, sticky="w")
+        self.name_var = tk.StringVar(value=initial.localized_name(lang) if initial else "")
+        ttk.Entry(body, textvariable=self.name_var, width=36).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 12))
+        panes = ttk.Frame(body)
+        panes.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(8, 12))
+        ttk.Label(panes, text=self._t("workflow_available")).grid(row=0, column=0, sticky="w")
+        self.workflow_item_label = ttk.Label(panes, text=self._t("workflow_item"))
+        self.workflow_item_label.grid(row=0, column=1, sticky="w", padx=(14, 0))
+        self.available_items = tk.Listbox(panes, height=12, width=30, exportselection=False)
+        self.available_items.grid(row=1, column=0, sticky="nsew")
+        self.workflow_editor = ttk.Frame(panes, width=340, height=220)
+        self.workflow_editor.grid(row=1, column=1, sticky="nsew", padx=(14, 0))
+        self.workflow_editor.grid_propagate(False)
+        self.workflow_editor.columnconfigure(0, weight=1)
+        self.workflow_editor.rowconfigure(0, weight=1)
+        self.items = tk.Listbox(self.workflow_editor, height=12, width=42, exportselection=False)
+        self.items.grid(row=0, column=0, sticky="nsew")
+        self.available_items.bind("<Double-1>", self._add_item)
+        self.items.bind("<Double-1>", self._edit_reference_arguments)
+        self._available_rows = [("sleep", None), *[("spec", spec) for spec in self.specs]]
+        self.available_items.insert("end", "💤 等待一下" if lang == "zh" else "💤 Sleep for a While")
+        for _kind, spec in self._available_rows[1:]:
+            self.available_items.insert("end", spec.localized_name(lang))
+        item_actions = ttk.Frame(body)
+        item_actions.grid(row=3, column=1, sticky="e", pady=(0, 12))
+        self.remove_button = ttk.Button(item_actions, text=self._t("remove_item"), command=self._remove_item)
+        self.remove_button.pack(side="right")
+        self.plain_text_button = ttk.Button(item_actions, text=self._t("plain_text_edit"), command=self._toggle_plain_text_edit)
+        self.plain_text_button.pack(side="right", padx=(0, 8))
+        buttons = ttk.Frame(body)
+        buttons.grid(row=4, column=0, columnspan=2, sticky="e")
+        ttk.Button(buttons, text=self._t("cancel"), command=self.destroy).pack(side="right", padx=(8, 0))
+        ttk.Button(buttons, text=self._t("save"), command=self.save).pack(side="right")
+        if initial:
+            for line in initial.command.splitlines():
+                if line.strip():
+                    self.items.insert("end", line.strip())
+        self.after_idle(self._present)
+
+    def _present(self):
+        self.lift(); self.focus_force()
+
+    def _add_item(self, _event=None):
+        selected = self.available_items.curselection()
+        if not selected:
+            return
+        kind, spec = self._available_rows[selected[0]]
+        if kind == "sleep":
+            self.items.insert("end", "[sleep](1s)")
+            self._plain_text_stale = True
+            return
+        if spec:
+            self.items.insert("end", f"[{spec.localized_name(self.lang)}]()")
+            self._plain_text_stale = True
+
+    def _remove_item(self):
+        selected = self.items.curselection()
+        if selected:
+            self.items.delete(selected[0])
+            self._plain_text_stale = True
+
+    def _toggle_plain_text_edit(self):
+        if self.plain_text_mode:
+            self._edit_as_workflow()
+        else:
+            self._edit_as_plain_text()
+
+    def _edit_as_plain_text(self):
+        if self._plain_text_stale:
+            command = "\n".join(self.items.get(0, "end"))
+            try:
+                expanded = workflow_plain_text(command, self.specs, self.root_dir, self.target)
+            except ValueError as exc:
+                messagebox.showerror(self._t("workflow_title"), self._t("invalid_config", error=exc), parent=self)
+                return
+        self.items.grid_remove()
+        if self.plain_text is None:
+            self.plain_text = tk.Text(
+                self.workflow_editor, height=1, width=1, wrap="none", undo=True,
+                bg="#ffffff", fg="#243954", relief="flat", borderwidth=0,
+                highlightthickness=1, highlightbackground="#cbd5e1", highlightcolor="#0b72e7",
+                font=("SFMono-Regular", 10), padx=8, pady=8,
+            )
+        if self._plain_text_stale:
+            self.plain_text.delete("1.0", "end")
+            self.plain_text.insert("1.0", expanded)
+            self._plain_text_stale = False
+        self.plain_text.grid(row=0, column=0, sticky="nsew")
+        self.workflow_item_label.configure(text=self._t("terminal_commands"))
+        self.available_items.configure(state="disabled")
+        self.remove_button.configure(state="disabled")
+        self.plain_text_button.configure(text=self._t("workflow_edit"))
+        self.plain_text_mode = True
+        self.plain_text.focus_set()
+
+    def _edit_as_workflow(self):
+        if self.plain_text is not None:
+            self.plain_text.grid_remove()
+        self.items.grid()
+        self.workflow_item_label.configure(text=self._t("workflow_item"))
+        self.available_items.configure(state="normal")
+        self.remove_button.configure(state="normal")
+        self.plain_text_button.configure(text=self._t("plain_text_edit"))
+        self.plain_text_mode = False
+        self.items.focus_set()
+
+    def _edit_reference_arguments(self, event=None):
+        index = self.items.nearest(event.y) if event is not None else (self.items.curselection()[0] if self.items.curselection() else None)
+        if index is None:
+            return
+        value = self.items.get(index)
+        parsed = parse_macro_line(value)
+        bounds = self.items.bbox(index)
+        if not parsed or not bounds:
+            return
+        title, arguments = parsed
+        self.items.selection_clear(0, "end")
+        self.items.selection_set(index)
+        self.items.activate(index)
+        row = tk.Frame(self.items, bg="#dcecff", highlightbackground="#0b72e7", highlightthickness=1, bd=0)
+        prefix = tk.Label(row, text=f"[{title}](", bg="#dcecff", fg="#0a5fbe", bd=0, padx=1, pady=0)
+        suffix = tk.Label(row, text=")", bg="#dcecff", fg="#0a5fbe", bd=0, padx=0, pady=0)
+        argument_var = tk.StringVar(value=arguments)
+        entry = tk.Entry(
+            row, textvariable=argument_var, relief="flat", bd=0, highlightthickness=0,
+            bg="#dcecff", fg="#0a5fbe", insertbackground="#0a5fbe", selectborderwidth=0,
+        )
+        prefix.pack(side="left")
+        entry.pack(side="left", fill="y")
+        suffix.pack(side="left")
+        row.place(x=0, y=bounds[1], width=self.items.winfo_width(), height=bounds[3])
+        measure_font = tkfont.Font(font=entry.cget("font"))
+        def resize(*_args):
+            width = max(measure_font.measure(argument_var.get() or " ") + 8, 18)
+            entry.configure(width=max(1, len(argument_var.get()) + 1))
+            entry.pack_configure(ipadx=max(0, (width - measure_font.measure(argument_var.get() or " ")) // 2))
+        argument_var.trace_add("write", resize)
+        resize()
+        finished = False
+        def finish(_event=None):
+            nonlocal finished
+            if finished:
+                return "break"
+            finished = True
+            updated_arguments = argument_var.get().strip()
+            try:
+                if title.lower() == SLEEP_MACRO_TITLE:
+                    parse_duration(updated_arguments)
+                else:
+                    _apply_macro_arguments("", updated_arguments)
+            except ValueError:
+                updated_arguments = arguments
+            self.items.delete(index)
+            self.items.insert(index, f"[{title}]({updated_arguments})")
+            self.items.selection_set(index)
+            self._plain_text_stale = True
+            row.destroy()
+            return "break"
+        entry.bind("<Return>", finish)
+        entry.bind("<FocusOut>", finish)
+        entry.bind("<Escape>", lambda _event: (argument_var.set(arguments), finish())[1])
+        entry.select_range(0, "end")
+        entry.focus_set()
+
+    def save(self):
+        name = self.name_var.get().strip()
+        command = self.plain_text.get("1.0", "end-1c").strip() if self.plain_text_mode else "\n".join(self.items.get(0, "end"))
+        if not name or not command:
+            messagebox.showwarning(self._t("incomplete"), self._t("invalid_workflow"), parent=self)
+            return
+        self.result = ProcessSpec(name, command, workflow=is_workflow_command(command))
+        self.destroy()
+
+
 class ProcessDialog(tk.Toplevel):
     def __init__(self, parent, initial: ProcessSpec | None = None, readonly: bool = False, lang: str = "zh", root_dir: Path | None = None, target: str | None = None):
         super().__init__(parent)
@@ -1067,7 +1458,7 @@ class ProcessDialog(tk.Toplevel):
         supports_lang = self.supports_lang_var.get()
         if not self._supports_lang_touched:
             supports_lang = probe_language_support(command, self.root_dir, self.target)
-        self.result = ProcessSpec(name, command, supports_lang=supports_lang)
+        self.result = ProcessSpec(name, command, supports_lang=supports_lang, workflow=is_workflow_command(command))
         self.destroy()
 
 
@@ -1183,7 +1574,7 @@ class App(tk.Tk):
         for key, text_key in (("integrated_label", "integrated"), ("console_label", "console"),
                               ("root_button", "set_root"), ("import_button", "import_config"),
                               ("export_button", "export_config"), ("process_list_label", "process_list"),
-                              ("add_button", "add_process"), ("group_button", "new_group"),
+                              ("add_button", "add_process"), ("workflow_button", "add_workflow"), ("group_button", "new_group"),
                               ("output_label", "output"), ("remove_button", "remove")):
             widget = self._ui_widgets.get(key)
             if widget is not None:
@@ -1237,6 +1628,8 @@ class App(tk.Tk):
         self._ui_widgets["process_list_label"].pack(side="left")
         RoundedButton(top, text="", command=self._toggle_process_list_window, width=38, icon="pin").pack(side="right", padx=(6, 0))
         # RoundedButton(top, text="添加进程", command=self._add, width=108, icon="plus")
+        self._ui_widgets["workflow_button"] = RoundedButton(top, text=self._t("add_workflow"), command=self._add_workflow, width=108, icon="plus")
+        self._ui_widgets["workflow_button"].pack(side="right", padx=(6, 0))
         self._ui_widgets["add_button"] = RoundedButton(top, text=self._t("add_process"), command=self._add, width=108, icon="plus")
         self._ui_widgets["add_button"].pack(side="right", padx=(6, 0))
         # RoundedButton(top, text="新建分组", command=self._add_group, width=108, icon="plus")
@@ -1301,7 +1694,7 @@ class App(tk.Tk):
         brand = ttk.Frame(footer, style="TFrame")
         brand.pack(side="right", anchor="e")
         ttk.Label(brand, text=f"v{VERSION_STRING}", style="Muted.TLabel", anchor="e").pack(side="left", padx=(0, 8))
-        ttk.Label(brand, text="LOGO", style="Muted.TLabel", anchor="e").pack(side="left")
+        horizontal_brand(brand, background="#f4f7fb").pack(side="left")
 
     def _style_tree_arrows(self):
         """Replace the theme indicator with compact text chevrons."""
@@ -1546,6 +1939,11 @@ class App(tk.Tk):
                 visible = self._desired_gui_visibility(item)
                 self.window_controller.set_visible(item, visible, focus=visible and item is focus_item)
 
+    def _focus_selected_window(self, item: ManagedProcess):
+        """Retry focus after GUI descendants have had time to create a window."""
+        if item.running and item in self.selected_items and self._desired_gui_visibility(item):
+            self.window_controller.set_visible(item, True, focus=True)
+
     def _group_opened(self, _event=None):
         if self._refreshing_tree:
             return
@@ -1590,6 +1988,7 @@ class App(tk.Tk):
                         "processes": [{"name": item.spec.name, "name_zh": item.spec.name_zh, "name_en": item.spec.name_en,
                                        "command": item.spec.command, "enabled": item.spec.enabled,
                                        "supports_lang": item.spec.supports_lang,
+                                       "workflow": item.spec.workflow if item.spec.workflow is not None else is_workflow_command(item.spec.command),
                                        "gui_mode": item.gui_mode, "lsl_streams": item.spec.lsl_streams} for item in group.items]}
                        for group in self.manager.groups],
         }
@@ -1601,9 +2000,23 @@ class App(tk.Tk):
         except (OSError, json.JSONDecodeError):
             return {}
 
+    def _validate_candidate(self, candidate: ProcessSpec | None = None, replacing: ManagedProcess | None = None) -> bool:
+        specs = [item.spec for item in self.manager.items if item is not replacing]
+        if candidate is not None:
+            specs.append(candidate)
+        try:
+            validate_macro_cycles(specs)
+        except ValueError as exc:
+            messagebox.showerror(self._t("invalid_config"), str(exc), parent=self._dialog_parent())
+            return False
+        return True
+
     def _save_config(self):
+        if not self._validate_candidate():
+            return False
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_PATH.write_text(json.dumps(self._config_data(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return True
 
     def _export_config(self):
         target = filedialog.asksaveasfilename(
@@ -1689,6 +2102,7 @@ class App(tk.Tk):
                         name_zh,
                         name_en,
                         entry.get("supports_lang") if isinstance(entry.get("supports_lang"), bool) else None,
+                        entry.get("workflow") if isinstance(entry.get("workflow"), bool) else is_workflow_command(str(entry["command"])),
                     ),
                     gui_mode=gui_mode,
                 ))
@@ -1784,6 +2198,8 @@ class App(tk.Tk):
         dialog = ProcessDialog(self._dialog_parent(), lang=self.lang, root_dir=self.root_dir, target=self.runtime.target)
         self.wait_window(dialog)
         if dialog.result:
+            if not self._validate_candidate(dialog.result):
+                return
             if self.lang == "zh":
                 dialog.result.name_zh = dialog.result.name
             else:
@@ -1798,6 +2214,21 @@ class App(tk.Tk):
             else:
                 self.manager.add(dialog.result)
             self._save_config(); self._refresh_tree()
+
+    def _add_workflow(self):
+        dialog = WorkflowDialog(self._dialog_parent(), [item.spec for item in self.manager.items], lang=self.lang, root_dir=self.root_dir, target=self.runtime.target)
+        self.wait_window(dialog)
+        if not dialog.result or not self._validate_candidate(dialog.result):
+            return
+        if self.lang == "zh":
+            dialog.result.name_zh = dialog.result.name
+        else:
+            dialog.result.name_en = dialog.result.name
+        anchor = self._selection_anchor()
+        group = self.manager.group_for(anchor) if isinstance(anchor, ManagedProcess) else anchor if isinstance(anchor, ProcessGroup) else None
+        index = group.items.index(anchor) + 1 if isinstance(anchor, ManagedProcess) else None
+        self.manager.add(dialog.result, group, index)
+        self._save_config(); self._refresh_tree()
 
     def _add_group(self):
         anchor = self._selection_anchor()
@@ -1841,9 +2272,28 @@ class App(tk.Tk):
             return
         self.selected = self.selected_items[0]
         readonly = self.selected.running
+        if not readonly and (self.selected.spec.workflow or is_workflow_command(self.selected.spec.command)):
+            dialog = WorkflowDialog(self._dialog_parent(), [item.spec for item in self.manager.items if item is not self.selected], self.selected.spec, lang=self.lang, root_dir=self.root_dir, target=self.runtime.target)
+            self.wait_window(dialog)
+            if not dialog.result or not self._validate_candidate(dialog.result, replacing=self.selected):
+                return
+            edited_name = dialog.result.name
+            previous_spec = self.selected.spec
+            dialog.result.name = previous_spec.name
+            dialog.result.name_zh = previous_spec.name_zh
+            dialog.result.name_en = previous_spec.name_en
+            self.selected.spec = dialog.result
+            if self.lang == "zh":
+                self.selected.spec.name_zh = edited_name
+            else:
+                self.selected.spec.name_en = edited_name
+            self._save_config(); self._refresh_tree()
+            return
         dialog = ProcessDialog(self._dialog_parent(), self.selected.spec, readonly=readonly, lang=self.lang, root_dir=self.root_dir, target=self.runtime.target)
         self.wait_window(dialog)
         if not readonly and dialog.result:
+            if not self._validate_candidate(dialog.result, replacing=self.selected):
+                return
             dialog.result.lsl_streams = scan_lsl_streams(dialog.result.command, self.root_dir)
             edited_name = dialog.result.name
             previous_spec = self.selected.spec
@@ -2226,7 +2676,10 @@ class App(tk.Tk):
         if kind in {"changed", "exit"}:
             self.after_idle(self._refresh_tree)
         if kind == "changed" and item.running:
-            self.window_controller.set_visible(item, self._desired_gui_visibility(item))
+            visible = self._desired_gui_visibility(item)
+            self.window_controller.set_visible(item, visible, focus=visible and item in self.selected_items)
+            if visible and item in self.selected_items:
+                self.after(250, lambda: self._focus_selected_window(item))
             if item in self.selected_items:
                 self.after_idle(self._refresh_tree)
         if item is self.selected and kind == "line" and item.running:

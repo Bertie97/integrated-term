@@ -37,6 +37,72 @@ class UiContractTests(unittest.TestCase):
         self.assertNotIn("_detect_language_support", self.source)
         self.assertIn('self.tree.heading("gui", text=self._t("gui"), anchor="center")', self.source)
 
+    def test_workflow_button_and_editor_are_declared(self):
+        self.assertIn('"add_workflow": "添加工作流"', self.source)
+        self.assertIn('command=self._add_workflow', self.source)
+        self.assertIn("class WorkflowDialog(tk.Toplevel)", self.source)
+        self.assertIn('self.available_items.bind("<Double-1>", self._add_item)', self.source)
+        self.assertIn('"💤 等待一下" if lang == "zh" else "💤 Sleep for a While"', self.source)
+        self.assertIn('self.items.insert("end", "[sleep](1s)")', self.source)
+        self.assertIn('self.items.bind("<Double-1>", self._edit_reference_arguments)', self.source)
+        self.assertIn('text=f"[{title}]("', self.source)
+        self.assertIn('text=")"', self.source)
+        self.assertIn('relief="flat", bd=0, highlightthickness=0', self.source)
+        self.assertIn('argument_var.trace_add("write", resize)', self.source)
+        self.assertIn('"plain_text_edit": "以纯文本编辑"', self.source)
+        self.assertIn('"workflow_edit": "以工作流编辑"', self.source)
+        self.assertIn('command=self._toggle_plain_text_edit', self.source)
+        self.assertIn('self.items.grid_remove()', self.source)
+        self.assertIn('self.plain_text = tk.Text(', self.source)
+        self.assertIn('self.workflow_editor.grid_propagate(False)', self.source)
+        self.assertIn('workflow=is_workflow_command(command)', self.source)
+
+    def test_workflow_plain_text_mode_replaces_the_child_list(self):
+        spec = importlib.util.spec_from_file_location("integrated_term_workflow_plain_text", APP)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        try:
+            root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(f"Tk display unavailable: {exc}")
+        root.withdraw()
+        dialog = None
+        try:
+            child = module.ProcessSpec("Child", "python child.py")
+            initial = module.ProcessSpec("Flow", "[Child]()\n[sleep](1s)", workflow=True)
+            dialog = module.WorkflowDialog(root, [child], initial, root_dir=PROJECT_DIR, target="macos")
+            dialog.update_idletasks()
+            list_width = dialog.items.winfo_width()
+
+            dialog._edit_as_plain_text()
+            dialog.update_idletasks()
+
+            self.assertIsInstance(dialog.plain_text, tk.Text)
+            self.assertEqual(dialog.plain_text.winfo_width(), list_width)
+            content = dialog.plain_text.get("1.0", "end-1c")
+            self.assertIn("python child.py\n\nsleep 1", content)
+            self.assertEqual(str(dialog.available_items.cget("state")), "disabled")
+            self.assertEqual(str(dialog.remove_button.cget("state")), "disabled")
+            self.assertEqual(str(dialog.plain_text_button.cget("text")), "以工作流编辑")
+
+            dialog.plain_text.insert("end", "\n# keep this edit")
+            dialog._toggle_plain_text_edit()
+            dialog.update_idletasks()
+            self.assertFalse(dialog.plain_text_mode)
+            self.assertEqual(dialog.items.winfo_width(), list_width)
+            self.assertEqual(str(dialog.available_items.cget("state")), "normal")
+            self.assertEqual(str(dialog.remove_button.cget("state")), "normal")
+            self.assertEqual(str(dialog.plain_text_button.cget("text")), "以纯文本编辑")
+
+            dialog._toggle_plain_text_edit()
+            self.assertTrue(dialog.plain_text_mode)
+            self.assertIn("# keep this edit", dialog.plain_text.get("1.0", "end-1c"))
+        finally:
+            if dialog is not None and dialog.winfo_exists():
+                dialog.destroy()
+            root.destroy()
+
     def test_font_awesome_assets_load_as_visible_tk_images(self):
         spec = importlib.util.spec_from_file_location("integrated_term_app", APP)
         module = importlib.util.module_from_spec(spec)
