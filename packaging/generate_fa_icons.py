@@ -36,6 +36,12 @@ def main() -> None:
             ImageDraw.Draw(source).text((36, 36), code, font=font, fill=color, anchor="mm")
             image = source.resize((18, 18), Image.Resampling.LANCZOS)
             image.save(OUTPUT_DIR / f"{name}-{variant}.png")
+            # Rasterize each DPI size from the font, not from the 18px bitmap.
+            for size in (24, 30, 36, 42, 48, 54, 60, 72):
+                large = Image.new("RGBA", (size * 4, size * 4), (0, 0, 0, 0))
+                face = ImageFont.truetype(str(FONT_PATH), round(size * 52 / 18))
+                ImageDraw.Draw(large).text((size * 2, size * 2), code, font=face, fill=color, anchor="mm")
+                large.resize((size, size), Image.Resampling.LANCZOS).save(OUTPUT_DIR / f"{name}-{variant}-{size}.png")
 
 
 if __name__ == "__main__":

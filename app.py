@@ -38,6 +38,35 @@ from branding import horizontal_brand
 from version import VERSION_STRING
 
 
+def ui_font(widget, size=11, weight="normal", fixed=False):
+    """Use the platform's real Tk family and point sizes; retain native DPI scaling."""
+    base = tkfont.nametofont("TkFixedFont" if fixed else "TkDefaultFont", root=widget)
+    native_size = base.cget("size")
+    if native_size < 0:
+        native_size = round(abs(native_size) / float(widget.tk.call("tk", "scaling")))
+    return (base.cget("family"), max(9, round((max(11, native_size) + size - 11) * 0.82)), weight)
+
+
+def measured_font(widget, specification):
+    """Create directly from requested attributes, not Tk's resolved font size.
+
+    Font(font=tuple) resolves 'font actual' first; on scaled X11 that size
+    can already include desktop scaling and would be scaled a second time.
+    """
+    family, size, weight = specification
+    return tkfont.Font(root=widget, family=family, size=size, weight=weight)
+
+
+def button_font(widget, weight="normal"):
+    family, _size, _ = ui_font(widget)
+    return (family, 8, weight)
+
+
+def title_font(widget):
+    family, _size, _ = ui_font(widget)
+    return (family, 16, "bold")
+
+
 APP_DIR = Path(__file__).resolve().parent
 BUNDLED_CONFIG_PATH = APP_DIR / "processes.json"
 
@@ -484,14 +513,16 @@ class RoundedButton(tk.Canvas):
         self._long_press_intent_ms = 180
         self._long_press_ms = 800
         self._enabled = True
+        self._minimum_width, self._minimum_height = width, height
         self._width, self._height = width, height
-        self._icon_images: dict[tuple[str, str], tk.PhotoImage] = {}
+        self._icon_images: dict[tuple[str, str, int], tk.PhotoImage] = {}
         try:
             canvas_bg = parent.cget("background") or "#ffffff"
         except (AttributeError, tk.TclError):
             canvas_bg = "#ffffff"
         self._canvas_bg = canvas_bg
         super().__init__(parent, width=width, height=height, bg=canvas_bg, highlightthickness=0, bd=0)
+        self._font = measured_font(self, button_font(self, weight="bold" if accent else "normal"))
         self.bind("<Button-1>", self._click)
         self.bind("<ButtonRelease-1>", self._release)
         self.bind("<Enter>", lambda _event: self._draw(hover=True))
@@ -499,6 +530,14 @@ class RoundedButton(tk.Canvas):
         self._draw()
 
     def _draw(self, hover=False):
+        line = self._font.metrics("linespace")
+        labels = [self._text, self._long_press_text] if self._long_press_command else [self._text]
+        self._icon_size = min((18, 24, 30, 36, 42, 48, 54, 60, 72), key=lambda size: abs(size - line * 0.8))
+        self._icon_gap = max(8, round(line * 0.2))
+        icon_space = self._icon_size + self._icon_gap if self._icon else 0
+        self._width = max(self._minimum_width, max(self._font.measure(t) for t in labels) + icon_space + 28)
+        self._height = max(40, self._minimum_height, line + 16)
+        super().configure(width=self._width, height=self._height)
         self.delete("all")
         radius = 9
         enabled = self._enabled
@@ -529,39 +568,22 @@ class RoundedButton(tk.Canvas):
             self.create_arc(left, top, left + size, top + size, start=90, extent=-360 * progress,
                             style="arc", outline="#ffffff", width=2, tags="long-press-progress")
         display_text = self._long_press_text if pressing else self._text
-        icon_width = 18 if self._icon else 0
-        text_width = len(display_text) * 5.5
-        content_width = text_width + (icon_width + 5 if self._icon else 0)
+        icon_width = self._icon_size if self._icon else 0
+        text_width = self._font.measure(display_text)
+        content_width = text_width + (icon_width + self._icon_gap if self._icon and display_text else icon_width)
         content_left = (self._width - content_width) / 2
         if self._icon:
-            if self._icon == "pin" and not self._text:
-                icon_offset = 2
-            elif display_text:
-                # Chinese glyph metrics need the historic optical correction;
-                # Latin/English labels use the mathematically centered icon.
-                has_cjk = any("\u3400" <= char <= "\u9fff" for char in display_text)
-                if not has_cjk:
-                    icon_offset = 0
-                elif display_text == "设置根目录":
-                    # icon_offset = -6 if display_text == "设置根目录" else -3
-                    icon_offset = -6
-                elif len(display_text) == 4:
-                    icon_offset = -8
-                else:
-                    # else -3 for Chinese labels
-                    icon_offset = -3
-            else:
-                icon_offset = 0
-            self._draw_icon(self._icon, content_left + icon_width / 2 + icon_offset, self._height / 2, foreground)
-        text_x = content_left + (icon_width + 5 if self._icon else 0) + text_width / 2
-        self.create_text(text_x, self._height / 2, text=display_text, fill=foreground, font=("SF Pro Display", 10, "bold" if self._accent else "normal"))
+            self._draw_icon(self._icon, content_left + icon_width / 2, self._height / 2, foreground)
+        text_x = content_left + (icon_width + self._icon_gap if self._icon and display_text else 0) + text_width / 2
+        self.create_text(text_x, self._height / 2, text=display_text, fill=foreground, font=self._font)
 
     def _draw_icon(self, icon, cx, cy, color):
         """Load a pre-rendered Font Awesome glyph through Tk itself."""
         variant = "white" if color == "#ffffff" else ("muted" if color == "#a8b4c1" else "dark")
-        path = FA_ICON_DIR / f"{icon}-{variant}.png"
+        suffix = f"-{self._icon_size}" if self._icon_size != 18 else ""
+        path = FA_ICON_DIR / f"{icon}-{variant}{suffix}.png"
         try:
-            cache_key = (icon, variant)
+            cache_key = (icon, variant, self._icon_size)
             if cache_key not in self._icon_images:
                 self._icon_images[cache_key] = tk.PhotoImage(file=str(path))
             image = self._icon_images[cache_key]
@@ -1165,6 +1187,7 @@ class LanguageToggle(tk.Canvas):
 class WorkflowDialog(tk.Toplevel):
     def __init__(self, parent, specs, initial: ProcessSpec | None = None, lang: str = "zh", root_dir: Path | None = None, target: str | None = None):
         super().__init__(parent)
+        self.withdraw()
         self.lang = lang
         self._t = lambda key, **kwargs: _text(self.lang, key, **kwargs)
         self.result: ProcessSpec | None = None
@@ -1176,9 +1199,11 @@ class WorkflowDialog(tk.Toplevel):
         self._plain_text_stale = True
         self.title(self._t("workflow_title"))
         self.transient(parent)
-        self.grab_set()
         body = ttk.Frame(self, padding=16)
         body.grid(sticky="nsew")
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
         ttk.Label(body, text=self._t("process_name")).grid(row=0, column=0, sticky="w")
         self.name_var = tk.StringVar(value=initial.localized_name(lang) if initial else "")
         ttk.Entry(body, textvariable=self.name_var, width=36).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 12))
@@ -1219,7 +1244,11 @@ class WorkflowDialog(tk.Toplevel):
         self.after_idle(self._present)
 
     def _present(self):
-        self.lift(); self.focus_force()
+        self.update_idletasks()
+        self.deiconify()
+        self.lift()
+        self.grab_set()
+        self.focus_set()
 
     def _add_item(self, _event=None):
         selected = self.available_items.curselection()
@@ -1260,7 +1289,7 @@ class WorkflowDialog(tk.Toplevel):
                 self.workflow_editor, height=1, width=1, wrap="none", undo=True,
                 bg="#ffffff", fg="#243954", relief="flat", borderwidth=0,
                 highlightthickness=1, highlightbackground="#cbd5e1", highlightcolor="#0b72e7",
-                font=("SFMono-Regular", 10), padx=8, pady=8,
+                font=ui_font(self, fixed=True), padx=8, pady=8,
             )
         if self._plain_text_stale:
             self.plain_text.delete("1.0", "end")
@@ -1356,6 +1385,7 @@ class WorkflowDialog(tk.Toplevel):
 class ProcessDialog(tk.Toplevel):
     def __init__(self, parent, initial: ProcessSpec | None = None, readonly: bool = False, lang: str = "zh", root_dir: Path | None = None, target: str | None = None):
         super().__init__(parent)
+        self.withdraw()
         self.lang = lang
         self._t = lambda key, **kwargs: _text(self.lang, key, **kwargs)
         self._escape_tag = f"ProcessDialogEscape{id(self)}"
@@ -1365,22 +1395,24 @@ class ProcessDialog(tk.Toplevel):
         self.root_dir = root_dir or Path.cwd()
         self.target = target
         self._supports_lang_touched = initial is not None and initial.supports_lang is not None
-        self.resizable(False, False)
+        self.resizable(True, True)
         self.result: ProcessSpec | None = None
         self.transient(parent)
         if isinstance(parent, tk.Toplevel):
             self.attributes("-topmost", True)
-        self.grab_set()
         self.after_idle(self._present)
         body = ttk.Frame(self, padding=18)
         body.grid(sticky="nsew")
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
         ttk.Label(body, text=self._t("process_name")).grid(row=0, column=0, sticky="w", pady=(0, 6))
         initial_name = initial.localized_name(lang) if initial else ""
         self.name_var = tk.StringVar(value=initial_name)
         self.name_entry = ttk.Entry(body, textvariable=self.name_var, width=42, state="readonly" if readonly else "normal")
         self.name_entry.grid(row=1, column=0, pady=(0, 12))
         ttk.Label(body, text=self._t("cli_command")).grid(row=2, column=0, sticky="w", pady=(0, 6))
-        self.command_text = tk.Text(body, width=48, height=6, wrap="none", bg="#f8fafc", fg="#243954", relief="solid", borderwidth=1, font=("SFMono-Regular", 10))
+        self.command_text = tk.Text(body, width=48, height=6, wrap="none", bg="#f8fafc", fg="#243954", relief="solid", borderwidth=1, font=ui_font(self, fixed=True))
         self.command_text.grid(row=3, column=0, pady=(0, 14))
         if initial:
             self.command_text.insert("1.0", initial.command)
@@ -1425,8 +1457,11 @@ class ProcessDialog(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.destroy)
     def _present(self):
         if self.winfo_exists():
+            self.update_idletasks()
+            self.deiconify()
             self.lift()
-            self.focus_force()
+            self.grab_set()
+            self.name_entry.focus_set()
 
     def _insert_newline(self, _event):
         self.command_text.insert("insert", "\n")
@@ -1489,7 +1524,10 @@ class App(tk.Tk):
         self.lang = "zh"
         self.title("集成终端控制台")
         self.title(self._t("app_title"))
-        self.geometry("1180x720")
+        scale = measured_font(self, ui_font(self)).metrics("linespace") / 22
+        width = min(self.winfo_screenwidth() - 80, round(1280 * max(1, scale)))
+        height = min(self.winfo_screenheight() - 100, round(800 * max(1, scale)))
+        self.geometry(f"{width}x{height}")
         self.minsize(900, 560)
         self.configure(bg="#f4f7fb")
         self._style()
@@ -1551,20 +1589,27 @@ class App(tk.Tk):
     def _style(self):
         style = ttk.Style(self)
         style.theme_use("clam")
+        # Scope classic-widget defaults: a global *Font overrides ttk styles.
+        for widget_class in ("Listbox", "Entry", "Text", "Label", "Button"):
+            self.option_add(f"*{widget_class}.Font", ui_font(self))
+        style.configure(".", font=ui_font(self))
+        line_height = measured_font(self, ui_font(self, 12, "bold")).metrics("linespace")
+        style.configure("TEntry", padding=(8, 8))
+        style.configure("TCombobox", padding=(8, 8))
         style.configure("TFrame", background="#f4f7fb")
         style.configure("Panel.TFrame", background="#ffffff", relief="flat", borderwidth=0)
-        style.configure("TLabel", background="#f4f7fb", foreground="#1d2b43", font=("SF Pro Display", 10))
-        style.configure("Panel.TLabel", background="#ffffff", foreground="#1d2b43", font=("SF Pro Display", 10))
-        style.configure("SectionTitle.TLabel", background="#ffffff", foreground="#1d2b43", font=("SF Pro Display", 13, "bold"))
+        style.configure("TLabel", background="#f4f7fb", foreground="#1d2b43", font=ui_font(self, 11))
+        style.configure("Panel.TLabel", background="#ffffff", foreground="#1d2b43", font=ui_font(self, 11))
+        style.configure("SectionTitle.TLabel", background="#ffffff", foreground="#1d2b43", font=ui_font(self, 13, "bold"))
         style.configure("TPanedwindow", background="#f4f7fb", borderwidth=0, relief="flat", sashwidth=8, sashpad=0, sashrelief="flat")
-        style.configure("Title.TLabel", font=("SF Pro Display", 18, "bold"), foreground="#13213a")
+        style.configure("Title.TLabel", font=title_font(self), foreground="#13213a")
         style.configure("Muted.TLabel", foreground="#647894")
-        style.configure("TButton", padding=(12, 7), background="#eaf1f8", foreground="#243954", borderwidth=0, relief="flat")
+        style.configure("TButton", font=button_font(self), padding=(16, 10), background="#eaf1f8", foreground="#243954", borderwidth=0, relief="flat")
         style.map("TButton", background=[("active", "#e7f1ff")], foreground=[("active", "#0b67d1")])
-        style.configure("Accent.TButton", padding=(14, 8), background="#0b72e7", foreground="#ffffff", borderwidth=0, relief="flat")
+        style.configure("Accent.TButton", font=button_font(self), padding=(18, 11), background="#0b72e7", foreground="#ffffff", borderwidth=0, relief="flat")
         style.map("Accent.TButton", background=[("active", "#075bbd")], foreground=[("active", "#ffffff")])
-        style.configure("Treeview", background="#ffffff", fieldbackground="#ffffff", foreground="#243954", rowheight=34, borderwidth=0, relief="flat", padding=0, lightcolor="#ffffff", darkcolor="#ffffff")
-        style.configure("Treeview.Heading", background="#eef4fb", foreground="#5b708b", font=("SF Pro Display", 11, "bold"), borderwidth=0, relief="flat", padding=0, lightcolor="#eef4fb", darkcolor="#eef4fb")
+        style.configure("Treeview", background="#ffffff", fieldbackground="#ffffff", foreground="#243954", font=ui_font(self), rowheight=max(40, line_height + 14), borderwidth=0, relief="flat", padding=0, lightcolor="#ffffff", darkcolor="#ffffff")
+        style.configure("Treeview.Heading", background="#eef4fb", foreground="#5b708b", font=ui_font(self, 11, "bold"), borderwidth=0, relief="flat", padding=0, lightcolor="#eef4fb", darkcolor="#eef4fb")
         style.map("Treeview", background=[("selected", "#dcecff")], foreground=[("selected", "#0a5fbe")])
 
     def _toggle_language(self):
@@ -1611,8 +1656,8 @@ class App(tk.Tk):
         self._ui_widgets["export_button"].pack(side="right", padx=(0, 8))
         self.language_button = RoundedButton(header, text=self._t("language"), command=self._toggle_language, width=52)
         self.language_button.pack(side="right", padx=(0, 8))
-        self.root_label = ttk.Label(header, text="", style="Muted.TLabel")
-        self.root_label.pack(side="right", padx=(0, 14))
+        self.root_label = ttk.Label(self, text="", style="Muted.TLabel")
+        self.root_label.pack(fill="x", padx=24, pady=(0, 8))
         self.root_label.configure(text=str(self.root_dir))
 
         split = ttk.Panedwindow(self, orient="horizontal")
@@ -1620,7 +1665,10 @@ class App(tk.Tk):
         left = RoundedPanel(split)
         right = RoundedPanel(split)
         split.add(left, weight=1)
-        split.add(right, weight=2)
+        split.add(right, weight=1)
+        # Idle callbacks can run before the paned window receives its real width.
+        # Initialize from its Configure event, then keep both panes accessible.
+        split.bind("<Configure>", self._layout_main_panes)
         left_content, right_content = left.content, right.content
         top = tk.Frame(left_content, bg="#ffffff")
         top.pack(fill="x", pady=(0, 10))
@@ -1628,18 +1676,20 @@ class App(tk.Tk):
         self._ui_widgets["process_list_label"].pack(side="left")
         RoundedButton(top, text="", command=self._toggle_process_list_window, width=38, icon="pin").pack(side="right", padx=(6, 0))
         # RoundedButton(top, text="添加进程", command=self._add, width=108, icon="plus")
-        self._ui_widgets["workflow_button"] = RoundedButton(top, text=self._t("add_workflow"), command=self._add_workflow, width=108, icon="plus")
+        toolbar = tk.Frame(left_content, bg="#ffffff")
+        toolbar.pack(fill="x", pady=(0, 10))
+        self._ui_widgets["workflow_button"] = RoundedButton(toolbar, text=self._t("add_workflow"), command=self._add_workflow, width=108, icon="plus")
         self._ui_widgets["workflow_button"].pack(side="right", padx=(6, 0))
-        self._ui_widgets["add_button"] = RoundedButton(top, text=self._t("add_process"), command=self._add, width=108, icon="plus")
+        self._ui_widgets["add_button"] = RoundedButton(toolbar, text=self._t("add_process"), command=self._add, width=108, icon="plus")
         self._ui_widgets["add_button"].pack(side="right", padx=(6, 0))
         # RoundedButton(top, text="新建分组", command=self._add_group, width=108, icon="plus")
-        self._ui_widgets["group_button"] = RoundedButton(top, text=self._t("new_group"), command=self._add_group, width=108, icon="plus")
+        self._ui_widgets["group_button"] = RoundedButton(toolbar, text=self._t("new_group"), command=self._add_group, width=108, icon="plus")
         self._ui_widgets["group_button"].pack(side="right")
         self.tree = ttk.Treeview(left_content, columns=("gui", "state", "pid"), show="tree headings", selectmode="extended")
         self._style_tree_arrows()
         self.tree.tag_configure("running", foreground="#18864b", background="#effaf3")
         self.tree.tag_configure("idle", foreground="#243954")
-        self.tree.tag_configure("group", foreground="#1d5fa7", background="#eef5fc", font=("SF Pro Display", 12, "bold"))
+        self.tree.tag_configure("group", foreground="#1d5fa7", background="#eef5fc", font=ui_font(self, 12, "bold"))
         self.tree.heading("#0", text=self._t("name"), anchor="w")
         self.tree.heading("gui", text=self._t("gui"), anchor="center")
         self.tree.heading("state", text=self._t("state"), anchor="w")
@@ -1655,7 +1705,8 @@ class App(tk.Tk):
         self.tree.bind("<Double-1>", self._double_click)
         self.tree.bind("<Return>", lambda _event: self._start())
         self.tree.bind("<space>", self._edit_from_keyboard)
-        self.tree.bind("<ButtonPress-1>", self._drag_start)
+        self.tree.bind("<ButtonPress-1>", self._gui_cell_click)
+        self.tree.bind("<ButtonPress-1>", self._drag_start, add="+")
         self.tree.bind("<Button-1>", self._group_click, add="+")
         self.tree.bind("<B1-Motion>", self._drag_motion)
         self.tree.bind("<ButtonRelease-1>", self._drag_end)
@@ -1679,8 +1730,8 @@ class App(tk.Tk):
         self._ui_widgets["output_label"].pack(side="left")
         self.log_status = ttk.Label(log_header, text=self._t("no_process"), style="Panel.TLabel")
         self.log_status.pack(side="right")
-        self.log = tk.Text(right_content, bg="#f8fafc", fg="#263a54", insertbackground="#0b72e7", relief="flat", borderwidth=0, highlightthickness=0, wrap="none", font=("SFMono-Regular", 10), padx=14, pady=14)
-        self.log.tag_configure("bold", font=("SFMono-Regular", 10, "bold"))
+        self.log = tk.Text(right_content, bg="#f8fafc", fg="#263a54", insertbackground="#0b72e7", relief="flat", borderwidth=0, highlightthickness=0, wrap="none", font=ui_font(self, fixed=True), spacing1=3, spacing3=3, padx=14, pady=14)
+        self.log.tag_configure("bold", font=ui_font(self, weight="bold", fixed=True))
         self.log.tag_configure("dim", foreground="#7d8da3")
         ansi_colors = {"color0": "#263a54", "color1": "#c0392b", "color2": "#20854a", "color3": "#a66a00", "color4": "#1769aa", "color5": "#8e44ad", "color6": "#087f8c", "color7": "#53657a"}
         for tag, color in ansi_colors.items():
@@ -1695,6 +1746,19 @@ class App(tk.Tk):
         brand.pack(side="right", anchor="e")
         ttk.Label(brand, text=f"v{VERSION_STRING}", style="Muted.TLabel", anchor="e").pack(side="left", padx=(0, 8))
         horizontal_brand(brand, background="#f4f7fb").pack(side="left")
+
+    def _layout_main_panes(self, event):
+        split = event.widget
+        width = event.width
+        if width <= 1:
+            return
+        minimum = min(320, width // 3)
+        if not getattr(self, "_main_panes_initialized", False):
+            position = round(width / 3)
+            self._main_panes_initialized = True
+        else:
+            position = split.sashpos(0)
+        split.sashpos(0, max(minimum, min(position, width - minimum)))
 
     def _style_tree_arrows(self):
         """Replace the theme indicator with compact text chevrons."""
@@ -1723,7 +1787,7 @@ class App(tk.Tk):
             style.layout("Pretty.Treeview.Heading", [("Treeheading.text", {"sticky": "nswe"}), ("Treeheading.image", {"side": "right", "sticky": ""})])
             self.tree.configure(style="Pretty.Treeview")
             style.configure("Pretty.Treeview", borderwidth=0, relief="flat", padding=0, lightcolor="#ffffff", darkcolor="#ffffff")
-            style.configure("Pretty.Treeview.Heading", background="#eef4fb", foreground="#5b708b", font=("SF Pro Display", 11, "bold"), borderwidth=0, relief="flat", padding=0, lightcolor="#eef4fb", darkcolor="#eef4fb")
+            style.configure("Pretty.Treeview.Heading", background="#eef4fb", foreground="#5b708b", font=ui_font(self, 11, "bold"), borderwidth=0, relief="flat", padding=0, lightcolor="#eef4fb", darkcolor="#eef4fb")
         except tk.TclError:
             pass
 
@@ -1753,7 +1817,7 @@ class App(tk.Tk):
         tree.column("pid", width=75, stretch=False)
         tree.tag_configure("running", foreground="#18864b", background="#effaf3")
         tree.tag_configure("idle", foreground="#243954")
-        tree.tag_configure("group", foreground="#1d5fa7", background="#eef5fc", font=("SF Pro Display", 12, "bold"))
+        tree.tag_configure("group", foreground="#1d5fa7", background="#eef5fc", font=ui_font(self, 12, "bold"))
         tree.pack(fill="both", expand=True)
         actions = tk.Frame(frame, bg="#ffffff")
         actions.pack(fill="x", pady=(10, 0))
@@ -1771,6 +1835,7 @@ class App(tk.Tk):
         tree.bind("<<TreeviewSelect>>", self._floating_tree_selected)
         tree.bind("<Command-a>", self._select_all_processes)
         tree.bind("<Control-a>", self._select_all_processes)
+        tree.bind("<Button-1>", self._gui_cell_click)
         tree.bind("<Double-1>", self._floating_double_click)
         window.protocol("WM_DELETE_WINDOW", self._close_process_list_window)
         self.process_list_tree = tree
@@ -1827,6 +1892,8 @@ class App(tk.Tk):
         return "break"
 
     def _floating_double_click(self, event):
+        if event.widget.identify_column(event.x) == "#1":
+            return "break"
         tree = self.process_list_tree
         if tree is None:
             return
@@ -1854,7 +1921,7 @@ class App(tk.Tk):
         panel.pack(fill="both", expand=True, padx=12, pady=12)
         self.process_terminal_status = ttk.Label(panel.content, text=self._t("no_process"), style="SectionTitle.TLabel")
         self.process_terminal_status.pack(fill="x", pady=(0, 8))
-        self.process_terminal_text = tk.Text(panel.content, bg="#f8fafc", fg="#263a54", relief="flat", borderwidth=0, highlightthickness=0, wrap="none", font=("SFMono-Regular", 10), padx=14, pady=14)
+        self.process_terminal_text = tk.Text(panel.content, bg="#f8fafc", fg="#263a54", relief="flat", borderwidth=0, highlightthickness=0, wrap="none", font=ui_font(self, fixed=True), spacing1=3, spacing3=3, padx=14, pady=14)
         self.process_terminal_text.pack(fill="both", expand=True)
         self.process_terminal_text.bind("<KeyPress>", self._log_keypress)
         window.protocol("WM_DELETE_WINDOW", self._close_process_terminal_window)
@@ -2372,6 +2439,8 @@ class App(tk.Tk):
                 self.tree.item(iid, values=({"auto": "◩", "show": "▣", "hide": "▢"}[candidate.gui_mode], *values[1:]))
 
     def _double_click(self, event):
+        if event.widget.identify_column(event.x) == "#1":
+            return "break"
         row = self.tree.identify_row(event.y)
         group = next((candidate for candidate in self.manager.groups if getattr(candidate, "_tree_id", None) == row), None)
         if group is not None:
@@ -2661,6 +2730,26 @@ class App(tk.Tk):
                 self.manager.start(item)
         self._save_config()
 
+    def _gui_cell_click(self, event):
+        tree = event.widget
+        if tree.identify_region(event.x, event.y) != "cell" or tree.identify_column(event.x) != "#1":
+            return
+        row = tree.identify_row(event.y)
+        if tree is self.tree:
+            item = next((item for item in self.manager.items if getattr(item, "_tree_id", None) == row), None)
+        else:
+            item = self._floating_tree_map.get(row)
+        if not isinstance(item, ManagedProcess):
+            return
+        # Change only the clicked process; an idle process keeps this preference
+        # for its next launch, without starting it or changing the selection.
+        item.gui_mode = {"auto": "show", "show": "hide", "hide": "auto"}[item.gui_mode]
+        self._sync_gui_visibility()
+        self._update_action_labels()
+        self._save_config()
+        self._refresh_tree()
+        return "break"
+
     def _toggle_gui(self):
         if not self.selected_items or not any(item.running for item in self.selected_items):
             return
@@ -2668,6 +2757,7 @@ class App(tk.Tk):
         next_mode = {"auto": "show", "show": "hide", "hide": "auto"}[current]
         for item in self.selected_items:
             item.gui_mode = next_mode
+        self._save_config()
         self._sync_gui_visibility()
         self._update_action_labels()
         self._refresh_tree()

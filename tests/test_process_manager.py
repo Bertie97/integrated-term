@@ -541,6 +541,43 @@ class ProcessManagerTests(unittest.TestCase):
         app._group_closed()
         self.assertTrue(group.expanded)
 
+    def test_gui_cell_cycles_idle_process_without_starting_or_changing_selection(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        item = ManagedProcess(ProcessSpec("demo", "echo demo"))
+        item._tree_id = "item"
+        tree = Mock()
+        tree.identify_region.return_value = "cell"
+        tree.identify_column.return_value = "#1"
+        tree.identify_row.return_value = "item"
+        window = object.__new__(App)
+        window.tree = tree
+        window.manager = SimpleNamespace(items=[item], start=Mock())
+        window.selected_items = []
+        window._sync_gui_visibility = Mock()
+        window._update_action_labels = Mock()
+        window._save_config = Mock()
+        window._refresh_tree = Mock()
+        event = SimpleNamespace(widget=tree, x=10, y=20)
+        for expected in ("show", "hide", "auto"):
+            self.assertEqual(window._gui_cell_click(event), "break")
+            self.assertEqual(item.gui_mode, expected)
+        self.assertEqual(window.selected_items, [])
+        window.manager.start.assert_not_called()
+        self.assertEqual(window._save_config.call_count, 3)
+        self.assertEqual(window._double_click(event), "break")
+        self.assertEqual(window._floating_double_click(event), "break")
+        tree.identify_region.return_value = "heading"
+        self.assertIsNone(window._gui_cell_click(event))
+        tree.identify_region.return_value = "cell"
+        floating = Mock()
+        floating.identify_region.return_value = "cell"
+        floating.identify_column.return_value = "#1"
+        floating.identify_row.return_value = "floating-item"
+        window._floating_tree_map = {"floating-item": item}
+        self.assertEqual(window._gui_cell_click(SimpleNamespace(widget=floating, x=10, y=20)), "break")
+        self.assertEqual(item.gui_mode, "show")
+
     def test_drag_requires_deliberate_pointer_movement(self):
         manager = ProcessManager(Path.cwd(), lambda *_args: None)
         item = manager.add(ProcessSpec("kept", "echo kept"))

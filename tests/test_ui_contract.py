@@ -57,6 +57,63 @@ class UiContractTests(unittest.TestCase):
         self.assertIn('self.workflow_editor.grid_propagate(False)', self.source)
         self.assertIn('workflow=is_workflow_command(command)', self.source)
 
+    def test_main_panes_stay_visible_after_mapping_and_resize(self):
+        import tempfile
+        from unittest.mock import patch
+        from tkinter import ttk
+        spec = importlib.util.spec_from_file_location("integrated_term_panes", APP)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        try:
+            probe = tk.Tk()
+            probe.destroy()
+        except tk.TclError as exc:
+            self.skipTest(f"Tk display unavailable: {exc}")
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(module, "CONFIG_PATH", pathlib.Path(directory) / "processes.json"), patch.object(module, "prune_registry"):
+                window = module.App()
+                try:
+                    window.update()
+                    split = next(w for w in window.winfo_children() if isinstance(w, ttk.Panedwindow))
+                    self.assertAlmostEqual(split.sashpos(0) / split.winfo_width(), 1 / 3, delta=0.02)
+                    initial = module.ProcessSpec("编辑测试", "python3 demo.py")
+                    for dialog_type, options in ((module.ProcessDialog, {}), (module.WorkflowDialog, {"specs": []})):
+                        dialog = dialog_type(window, initial=initial, **options)
+                        window.update()
+                        self.assertTrue(dialog.winfo_ismapped())
+                        self.assertEqual(dialog.name_var.get(), initial.name)
+                        if isinstance(dialog, module.ProcessDialog):
+                            self.assertTrue(dialog.command_text.winfo_ismapped())
+                            self.assertEqual(dialog.command_text.get("1.0", "end-1c"), initial.command)
+                        else:
+                            self.assertTrue(dialog.items.winfo_ismapped())
+                            self.assertEqual(dialog.items.get(0), initial.command)
+                        dialog.destroy()
+                    button = window.start_button
+                    title = window._ui_widgets["integrated_label"]
+                    self.assertFalse(str(title.cget("font")), "Global option database must not override the title style")
+                    expected = module.tkfont.Font(root=window, family=module.button_font(window)[0], size=8)
+                    self.assertEqual(button._font.metrics("linespace"), expected.metrics("linespace"))
+                    self.assertGreater(title.winfo_height(), button._font.metrics("linespace"))
+                    old_size = button._icon_size
+                    button._font.configure(size=button._font.cget("size") + 8)
+                    button._draw()
+                    self.assertGreater(button._icon_size, old_size)
+                    self.assertTrue(any(image.width() == button._icon_size for image in button._icon_images.values()))
+                    for geometry in (None, "1000x650", "1400x850"):
+                        if geometry:
+                            window.geometry(geometry)
+                        window.update()
+                        self.assertTrue(window.tree.winfo_ismapped())
+                        self.assertTrue(window.log.winfo_ismapped())
+                        self.assertGreater(window.tree.winfo_width(), 200)
+                        self.assertGreater(window.log.winfo_width(), 200)
+                        self.assertGreater(split.sashpos(0), 0)
+                        self.assertLess(split.sashpos(0), split.winfo_width())
+                finally:
+                    window.destroy()
+
     def test_workflow_plain_text_mode_replaces_the_child_list(self):
         spec = importlib.util.spec_from_file_location("integrated_term_workflow_plain_text", APP)
         module = importlib.util.module_from_spec(spec)
@@ -116,8 +173,8 @@ class UiContractTests(unittest.TestCase):
         try:
             button = module.RoundedButton(root, text="", command=lambda: None, width=38, icon="pin")
             root.update_idletasks()
-            image = button._icon_images[("pin", "dark")]
-            self.assertEqual((image.width(), image.height()), (18, 18))
+            image = button._icon_images[("pin", "dark", button._icon_size)]
+            self.assertEqual((image.width(), image.height()), (button._icon_size, button._icon_size))
             opaque_pixels = sum(
                 not int(root.tk.call(str(image), "transparency", "get", x, y))
                 for y in range(image.height())
@@ -227,9 +284,9 @@ class UiContractTests(unittest.TestCase):
         self.assertIn('style.configure("Treeview"', self.source)
         self.assertIn('borderwidth=0, relief="flat"', self.source)
         self.assertIn('highlightthickness=0', self.source)
-        self.assertEqual(self.source.count('font=("SF Pro Display", 12, "bold")'), 2)
-        self.assertIn('font=("SF Pro Display", 13, "bold")', self.source)
-        self.assertIn('font=("SF Pro Display", 11, "bold")', self.source)
+        self.assertEqual(self.source.count('background="#eef5fc", font=ui_font(self, 12, "bold")'), 2)
+        self.assertIn('font=ui_font(self, 13, "bold")', self.source)
+        self.assertIn('font=ui_font(self, 11, "bold")', self.source)
         self.assertEqual(self.source.count('style="SectionTitle.TLabel"'), 3)
         self.assertIn('style.configure("TPanedwindow"', self.source)
         self.assertIn('sashwidth=8', self.source)
@@ -246,11 +303,8 @@ class UiContractTests(unittest.TestCase):
         self.assertIn('focused_item = next(', self.source)
         self.assertTrue((PROJECT_DIR / "assets" / "icons" / "fa" / "terminal-dark.png").exists())
         self.assertIn('content_left = (self._width - content_width) / 2', self.source)
-        self.assertIn('icon_offset = 2', self.source)
-        self.assertIn('else -3', self.source)
-        self.assertIn('icon_offset = -6 if display_text == "设置根目录"', self.source)
-        self.assertIn('if len(display_text) == 4:', self.source)
-        self.assertIn('icon_offset = -8', self.source)
+        self.assertIn('text_width = self._font.measure(display_text)', self.source)
+        self.assertNotIn('text_width = len(display_text)', self.source)
         self.assertIn('text="设置根目录"', self.source)
         self.assertIn('self.floating_gui_button', self.source)
         self.assertIn('self.floating_start_button', self.source)
