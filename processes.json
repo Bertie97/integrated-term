@@ -1,5 +1,5 @@
 {
-  "root_dir": "/Users/apple/文档空间/学术平台/脑机接口/飞控系统",
+  "root_dir": "/Users/apple/文档空间/脑机接口/外设系统",
   "groups": [
     {
       "name": "环境配置",
@@ -9,24 +9,48 @@
       "expanded": true,
       "processes": [
         {
+          "name": "📜 Notion 转 PDF",
+          "name_zh": "📜 Notion 转 PDF",
+          "name_en": null,
+          "command": "cd \"/Users/apple/文档空间/软件中心/工作小工具/Notion-PDF\"\nuv run python -m notion_pdf.gui",
+          "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
+          "gui_mode": "auto",
+          "lsl_streams": []
+        },
+        {
+          "name": "🏞️ PNG 转 SVG",
+          "name_zh": "🏞️ PNG 转 SVG",
+          "name_en": null,
+          "command": "cd \"/Users/apple/文档空间/软件中心/工作小工具/PNG-SVG\"\npython3 app.py",
+          "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
+          "gui_mode": "auto",
+          "lsl_streams": []
+        },
+        {
           "name": "🏝️ 配置脑机环境",
           "name_zh": "🏝️ 配置脑机环境",
           "name_en": "🏝️ Configure BCI Environment",
           "command": "cd coadptation-emg-bci-cursor-control-NMI\nuv sync",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
-          "lsl_streams": [],
-          "supports_lang": false
+          "lsl_streams": []
         },
         {
           "name": "🛜 LSL信息流监控",
-          "name_zh": "🛜 LSL信息流监控",
+          "name_zh": "🛜 LSL 信息流监控",
           "name_en": "🛜 LSL Stream Monitor",
           "command": "cd LSL-Viewer\nuv run lsl-viewer",
           "enabled": true,
+          "supports_lang": true,
+          "workflow": false,
           "gui_mode": "show",
-          "lsl_streams": [],
-          "supports_lang": true
+          "lsl_streams": []
         },
         {
           "name": "📷 相机参数标定",
@@ -34,9 +58,10 @@
           "name_en": "📷 Camera Calibration",
           "command": "cd MuJoCo_Sim/bci-control-drone\nenv -u PYTHONPATH uv run \\\n  python tools/calibrate_belly_camera/calibrate.py \\\n  --board-image tools/calibrate_belly_camera/board_10x7_20mm_300dpi.png \\\n  --output config/cameras/belly_camera.yaml \\\n  --frames 25 \\\n  --sample-interval 0.1 \\\n  --min-view-shift-px 8 \\\n  --hold-seconds 0.35 \\\n  --max-corner-motion-px 1.5 \\\n  --min-coverage-regions 5 \\\n  --min-scale-span 0.15 \\\n  --min-perspective-span 0.04",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
-          "lsl_streams": [],
-          "supports_lang": false
+          "lsl_streams": []
         },
         {
           "name": "🔑 生成起飞密钥",
@@ -44,9 +69,10 @@
           "name_en": "🔑 Generate Takeoff Key",
           "command": "cd MuJoCo_Sim/bci-control-sim\nuv run python scripts/generate_takeoff_keys.py \\\n  --private-key ~/.config/bci-control/takeoff_ed25519_private.pem \\\n  --public-key ~/.config/bci-control/controller.pub",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
-          "lsl_streams": [],
-          "supports_lang": false
+          "lsl_streams": []
         }
       ]
     },
@@ -63,9 +89,10 @@
           "name_en": "🖥️ EMG Signal Monitor",
           "command": "cd coadptation-emg-bci-cursor-control-NMI\nuv run python scripts/emg_drone_task/monitor_raw_emg_stream.py",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "show",
-          "lsl_streams": [],
-          "supports_lang": false
+          "lsl_streams": []
         },
         {
           "name": "💪🏻 【测试】肌电数据回放",
@@ -73,6 +100,8 @@
           "name_en": "💪🏻 [Test] EMG Data Replay",
           "command": "cd coadptation-emg-bci-cursor-control-NMI\nuv run python -m scripts.emg_drone_task.mock_keyboard_emg_source",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "show",
           "lsl_streams": [
             {
@@ -85,8 +114,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": false
+          ]
         },
         {
           "name": "📻 【实机】肌电解码工作台",
@@ -94,19 +122,21 @@
           "name_en": "📻 [Real] EMG Decoding Workbench",
           "command": "cd coadptation-emg-bci-cursor-control-NMI\nuv run python -m trainer.emg_drone_task.workbench",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "show",
-          "lsl_streams": [],
-          "supports_lang": false
+          "lsl_streams": []
         },
         {
           "name": "💿 【测试】肌电工作台-回放解码",
           "name_zh": "💿 【测试】肌电工作台-回放解码",
           "name_en": "💿 [Test] EMG Workbench - Replay Decode",
-          "command": "cd coadptation-emg-bci-cursor-control-NMI\nuv run python -m trainer.emg_drone_task.workbench \\\n  --decoder /Users/apple/文档空间/学术平台/脑机接口/飞控系统/mocked-data/sessions/P01-20260908-141313-c95a5f33/candidate/decoder.json",
+          "command": "[📻 【实机】肌电解码工作台](--decoder /Users/apple/文档空间/学术平台/脑机接口/飞控系统/mocked-data/sessions/P01-20260908-141313-c95a5f33/candidate/decoder.json)",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": true,
           "gui_mode": "auto",
-          "lsl_streams": [],
-          "supports_lang": false
+          "lsl_streams": []
         }
       ]
     },
@@ -123,9 +153,10 @@
           "name_en": "🏑 Flight Bridge - Direct",
           "command": "cd MuJoCo_Sim/bci-control-sim\nuv run python ctrlsignal/bci_bridge/bridge.py \\\n  --task quadrotor_hover \\\n  --confidence-threshold 0.55 \\\n  --idle-margin 0.10",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
-          "lsl_streams": [],
-          "supports_lang": false
+          "lsl_streams": []
         },
         {
           "name": "🎛️ 飞控桥接-状态机",
@@ -133,6 +164,8 @@
           "name_en": "🎛️ Flight Bridge - State Machine",
           "command": "cd MuJoCo_Sim/bci-control-sim\n.venv/bin/python -m ctrlsignal.sm_bridge",
           "enabled": true,
+          "supports_lang": true,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -145,8 +178,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": true
+          ]
         },
         {
           "name": "️🎮 飞控桥接-集成空间",
@@ -154,6 +186,8 @@
           "name_en": "🎮 Flight Bridge - Integrated Space",
           "command": "cd DataLink-FrontEnd\nuv run datalink-frontend run \\\n  --config configs/bci_quadrotor_4class.yaml \\\n  --gui \\\n  --keyboard \\\n  --no-developer-mode",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "show",
           "lsl_streams": [
             {
@@ -166,8 +200,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": false
+          ]
         }
       ]
     },
@@ -184,6 +217,8 @@
           "name_en": "🔮 Sim Environment - Drone",
           "command": "cd MuJoCo_Sim/bci-control-sim\nuv run mjpython -m bci_control_sim.cli run quadrotor_hover --viewer \\\n  --scene mission",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "show",
           "lsl_streams": [
             {
@@ -216,15 +251,16 @@
                 }
               ]
             }
-          ],
-          "supports_lang": false
+          ]
         },
         {
           "name": "🛟 仿真桥接-地垫围栏",
           "name_zh": "🛟 仿真桥接-地垫围栏",
           "name_en": "🛟 Sim Bridge - Floor Pad Fence",
-          "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 127.0.0.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9001 \\\n  --tello-state-port 8891 \\\n  --tello-video-port 11112 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --fence floor-pad \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
+          "command": "cd bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 127.0.0.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9001 \\\n  --tello-state-port 8891 \\\n  --tello-video-port 11112 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --fence floor-pad \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -277,15 +313,16 @@
                 }
               ]
             }
-          ],
-          "supports_lang": false
+          ]
         },
         {
           "name": "🪁 仿真桥接-视觉围栏",
           "name_zh": "🪁 仿真桥接-视觉围栏",
           "name_en": "🪁 Sim Bridge - Visual Fence",
-          "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 127.0.0.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9001 \\\n  --tello-state-port 8891 \\\n  --tello-video-port 11112 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --visual-localization --mission-pad \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
+          "command": "cd bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 127.0.0.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9001 \\\n  --tello-state-port 8891 \\\n  --tello-video-port 11112 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --visual-localization --mission-pad \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -338,8 +375,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": false
+          ]
         },
         {
           "name": "✳️ 真机桥接-地垫围栏",
@@ -347,6 +383,8 @@
           "name_en": "✳️ Real Drone Bridge - Floor Pad Fence",
           "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 192.168.10.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9000 \\\n  --tello-state-port 8890 \\\n  --tello-video-port 11111 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --fence floor-pad \\\n  --video-file logs/camera_$(date +%Y%m%d_%H%M%S).mp4 \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -399,8 +437,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": false
+          ]
         },
         {
           "name": "🌌 真机桥接-任务板围栏",
@@ -408,6 +445,8 @@
           "name_en": "🌌 Real Drone Bridge - Mission Pad Fence",
           "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 192.168.10.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9000 \\\n  --tello-state-port 8890 \\\n  --tello-video-port 11111 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --mission-pad \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -460,8 +499,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": false
+          ]
         },
         {
           "name": "🚁 真机桥接-视觉围栏",
@@ -469,6 +507,8 @@
           "name_en": "🚁 Real Drone Bridge - Visual Fence",
           "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 192.168.10.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9000 \\\n  --tello-state-port 8890 \\\n  --tello-video-port 11111 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --visual-localization --mission-pad \\\n  --video-file logs/camera_$(date +%Y%m%d_%H%M%S).mp4 \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -521,8 +561,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": false
+          ]
         },
         {
           "name": "🈚️ 真机桥接-无围栏",
@@ -530,6 +569,8 @@
           "name_en": "🈚️ Real Drone Bridge - No Fence",
           "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello bci-drone \\\n  --tello-host 192.168.10.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9000 \\\n  --tello-state-port 8890 \\\n  --tello-video-port 11111 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --fence none \\\n  --publish-controller-state \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -582,8 +623,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": false
+          ]
         },
         {
           "name": "🔐 仿真桥接-无授权起飞",
@@ -591,6 +631,8 @@
           "name_en": "🔐 Sim Bridge - Unauthorized Takeoff",
           "command": "cd MuJoCo_Sim/bci-control-drone\nuv run --extra tello --extra visual bci-drone \\\n  --tello-host 127.0.0.1 \\\n  --tello-command-port 8889 \\\n  --tello-local-command-port 9000 \\\n  --tello-state-port 8891 \\\n  --tello-video-port 11112 \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation \\\n  --visual-localization --mission-pad \\\n  --publish-controller-state \\\n  --no-takeoff-key",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -643,8 +685,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": false
+          ]
         },
         {
           "name": "🕹️ 键盘遥控器-无人机",
@@ -652,6 +693,8 @@
           "name_en": "🕹️ Keyboard Remote - Drone",
           "command": "cd MuJoCo_Sim/bci-control-sim\nenv -u PYTHONPATH uv run python ctrlsignal/keyboard/keyboard_lsl.py \\\n  --task quadrotor_hover",
           "enabled": true,
+          "supports_lang": true,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -664,8 +707,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": true
+          ]
         },
         {
           "name": "🎲 键盘3D遥控器-无人机",
@@ -673,6 +715,8 @@
           "name_en": "🎲 Keyboard 3D Remote - Drone",
           "command": "cd MuJoCo_Sim/bci-control-sim\nenv -u PYTHONPATH uv run python ctrlsignal/keyboard/keyboard_lsl.py \\\n  --task quadrotor_hover --3d",
           "enabled": true,
+          "supports_lang": true,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -685,8 +729,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": true
+          ]
         }
       ]
     },
@@ -703,6 +746,8 @@
           "name_en": "🖲️ Sim Environment - UWB Positioning",
           "command": "cd MuJoCo_Sim/bci-control-sim\nuv run mjpython -m bci_control_sim.cli \\\n  run quadrotor_uwb --lsl --lsl-stream-type BCIControlSignalSimulation --viewer \\\n  --takeoff-public-key /Users/apple/.config/bci-control/controller.pub \\\n  --uwb-layout-panel --scene 3D-sim",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -735,8 +780,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": false
+          ]
         },
         {
           "name": "🕹️ 键盘遥控器-UWB定位",
@@ -744,6 +788,8 @@
           "name_en": "🕹️ Keyboard Remote - UWB Positioning",
           "command": "cd MuJoCo_Sim/bci-control-sim\nenv -u PYTHONPATH uv run python ctrlsignal/keyboard/keyboard_lsl.py \\\n  --task quadrotor_uwb",
           "enabled": true,
+          "supports_lang": true,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -756,8 +802,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": true
+          ]
         }
       ]
     },
@@ -774,9 +819,32 @@
           "name_en": "🦾 Sim Environment - Robotic Arm",
           "command": "cd MuJoCo_Sim/bci-control-sim\nenv -u PYTHONPATH uv run mjpython \\\n  -m bci_control_sim.cli run arm_reach --viewer \\\n  --lsl --lsl-stream-type BCIControlSignalSimulation",
           "enabled": true,
+          "supports_lang": false,
+          "workflow": false,
           "gui_mode": "auto",
-          "lsl_streams": [],
-          "supports_lang": false
+          "lsl_streams": []
+        },
+        {
+          "name": "🦾 仿真环境-RM65",
+          "name_zh": "🦾 仿真环境-RM65",
+          "name_en": null,
+          "command": "[🦾 仿真环境-机械臂](--arm RM65)",
+          "enabled": true,
+          "supports_lang": null,
+          "workflow": true,
+          "gui_mode": "auto",
+          "lsl_streams": []
+        },
+        {
+          "name": "🦾 仿真环境-RM75",
+          "name_zh": "🦾 仿真环境-RM75",
+          "name_en": null,
+          "command": "[🦾 仿真环境-机械臂](--arm RM75)",
+          "enabled": true,
+          "supports_lang": null,
+          "workflow": true,
+          "gui_mode": "auto",
+          "lsl_streams": []
         },
         {
           "name": "🕹键盘遥控器-机械臂️",
@@ -784,6 +852,8 @@
           "name_en": "🕹 Keyboard Remote - Robotic Arm",
           "command": "cd MuJoCo_Sim/bci-control-sim\nenv -u PYTHONPATH uv run python ctrlsignal/keyboard/keyboard_lsl.py \\\n  --task arm_reach",
           "enabled": true,
+          "supports_lang": true,
+          "workflow": false,
           "gui_mode": "auto",
           "lsl_streams": [
             {
@@ -796,8 +866,7 @@
                 }
               ]
             }
-          ],
-          "supports_lang": true
+          ]
         }
       ]
     },
