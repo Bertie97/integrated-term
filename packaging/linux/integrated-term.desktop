@@ -6,4 +6,4 @@ Exec=集成终端控制台
 Icon=integrated-term-icon-opaque
 Terminal=false
 Categories=Development;Utility;
-StartupWMClass=集成终端控制台
+StartupWMClass=Integratedterm

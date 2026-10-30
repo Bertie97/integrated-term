@@ -684,6 +684,37 @@ class ProcessManagerTests(unittest.TestCase):
         item = ManagedProcess(ProcessSpec("viewer", "echo"))
         self.assertFalse(controller.is_visible(item))
 
+    def test_window_control_preflight_warns_only_once_for_missing_tools(self):
+        from unittest.mock import Mock
+        controller = object.__new__(WindowController)
+        controller.root = Mock()
+        controller._preflight_checked = False
+        with patch("app.platform.system", return_value="Linux"), patch("app.shutil.which", return_value=None), patch("app.Path.is_file", return_value=False), patch.dict("app.os.environ", {"DISPLAY": ":1", "XDG_SESSION_TYPE": "x11"}), patch("app.messagebox.showwarning") as warning:
+            controller._check_window_control()
+            controller._check_window_control()
+            warning.assert_called_once()
+            self.assertIn("sudo apt install xdotool", warning.call_args.args[1])
+
+    def test_restart_waits_for_cleanup_and_starts_each_item_once(self):
+        from unittest.mock import Mock
+        from types import SimpleNamespace
+        window = object.__new__(App)
+        slow = ManagedProcess(ProcessSpec("slow", "echo slow"), stopping=True)
+        fast = ManagedProcess(ProcessSpec("fast", "echo fast"))
+        window.manager = SimpleNamespace(items=[slow, fast], start=Mock())
+        window._save_config = Mock()
+        callbacks = []
+        window.after = lambda delay, callback: callbacks.append(callback)
+        window._restart_remaining([slow, fast])
+        window.manager.start.assert_called_once_with(fast)
+        callbacks.pop(0)()
+        self.assertEqual(window.manager.start.call_count, 1)
+        slow.stopping = False
+        callbacks.pop(0)()
+        self.assertEqual(window.manager.start.call_count, 2)
+        window.manager.start.assert_called_with(slow)
+        self.assertEqual(callbacks, [])
+
     def test_window_controller_has_cross_platform_adapters(self):
         self.assertTrue(hasattr(WindowController, "_platform_window"))
         self.assertTrue(hasattr(WindowController, "_windows_window"))

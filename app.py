@@ -22,9 +22,10 @@ import time
 import tkinter as tk
 import ctypes
 import ctypes.wintypes
+import ctypes.util
 from dataclasses import dataclass, field
 from pathlib import Path
-from tkinter import filedialog, font as tkfont, messagebox, simpledialog, ttk
+from tkinter import filedialog, font as tkfont, simpledialog, ttk
 
 from lsl_registry import (
     build_entry,
@@ -35,6 +36,7 @@ from lsl_registry import (
     unregister_process,
 )
 from branding import horizontal_brand
+from dialog_theme import messagebox, style_dialog
 from version import VERSION_STRING
 
 
@@ -727,6 +729,7 @@ class WindowController:
     def __init__(self, root: tk.Misc):
         self.root = root
         self._last_visibility: dict[tuple[int, int], bool] = {}
+        self._preflight_checked = False
         self._visibility_lock = threading.Lock()
         self._osascript_lock = threading.Lock()
         self._visibility_queue: queue.Queue[tuple[ManagedProcess, bool, bool] | None] = queue.Queue()
@@ -830,15 +833,75 @@ class WindowController:
 
         user32.EnumWindows(visit, 0)
 
+    def _x11_owned_windows(self, pids):
+        """Resolve Tk windows without _NET_WM_PID using the XRes server API."""
+        class Spec(ctypes.Structure):
+            _fields_ = [("client", ctypes.c_ulong), ("mask", ctypes.c_ulong)]
+        class Value(ctypes.Structure):
+            _fields_ = [("spec", Spec), ("length", ctypes.c_long), ("value", ctypes.c_void_p)]
+        display = None
+        try:
+            x11_path, xres_path = ctypes.util.find_library("X11"), ctypes.util.find_library("XRes")
+            if not x11_path or not xres_path:
+                return []
+            x11, xres = ctypes.CDLL(x11_path), ctypes.CDLL(xres_path)
+            x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            x11.XOpenDisplay.restype = ctypes.c_void_p
+            x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+            xres.XResQueryClientIds.argtypes = [ctypes.c_void_p, ctypes.c_long, ctypes.POINTER(Spec), ctypes.POINTER(ctypes.c_long), ctypes.POINTER(ctypes.POINTER(Value))]
+            xres.XResGetClientPid.argtypes = [ctypes.POINTER(Value)]
+            xres.XResGetClientPid.restype = ctypes.c_int
+            xres.XResClientIdsDestroy.argtypes = [ctypes.c_long, ctypes.POINTER(Value)]
+            display = x11.XOpenDisplay(None)
+            if not display:
+                return []
+            output = subprocess.check_output(["xprop", "-root", "_NET_CLIENT_LIST"], text=True, stderr=subprocess.DEVNULL, timeout=3)
+            # Unmapped Tk windows disappear from _NET_CLIENT_LIST. Include
+            # root children so they can be found again even after app restart.
+            x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+            x11.XDefaultRootWindow.restype = ctypes.c_ulong
+            x11.XQueryTree.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)), ctypes.POINTER(ctypes.c_uint)]
+            x11.XFree.argtypes = [ctypes.c_void_p]
+            root, parent = ctypes.c_ulong(), ctypes.c_ulong()
+            children, count_children = ctypes.POINTER(ctypes.c_ulong)(), ctypes.c_uint()
+            windows = [int(w, 16) for w in re.findall(r"0x[0-9a-fA-F]+", output)]
+            x11.XQueryTree(display, x11.XDefaultRootWindow(display), ctypes.byref(root), ctypes.byref(parent), ctypes.byref(children), ctypes.byref(count_children))
+            try:
+                windows.extend(children[i] for i in range(count_children.value) if children[i] not in windows)
+            finally:
+                if children:
+                    x11.XFree(children)
+            found = []
+            for window in windows:
+                spec = Spec(window, 2)  # XRES_CLIENT_ID_PID_MASK
+                count, values = ctypes.c_long(), ctypes.POINTER(Value)()
+                xres.XResQueryClientIds(display, 1, ctypes.byref(spec), ctypes.byref(count), ctypes.byref(values))
+                try:
+                    if any(xres.XResGetClientPid(ctypes.byref(values[i])) in pids for i in range(count.value)):
+                        # Ignore helper windows: real top-level windows retain WM_STATE
+                        # after unmapping, whereas Tk's hidden application root does not.
+                        state = subprocess.check_output(["xprop", "-id", str(window), "WM_STATE"], text=True, stderr=subprocess.DEVNULL, timeout=3)
+                        if "WM_STATE(WM_STATE)" in state:
+                            found.append(str(window))
+                finally:
+                    xres.XResClientIdsDestroy(count, values)
+            return found
+        except (OSError, AttributeError, subprocess.SubprocessError):
+            return []
+        finally:
+            if display:
+                x11.XCloseDisplay(display)
+
     def _linux_window(self, pid: int, visible: bool, focus: bool = False) -> None:
         """Use wmctrl, then xdotool, for X11 desktop window control."""
         if platform.system() != "Linux":
             return
+        pids = [pid, *self._descendants(pid)]
         wmctrl = shutil.which("wmctrl")
         if wmctrl:
             try:
                 output = subprocess.check_output([wmctrl, "-lp"], text=True, stderr=subprocess.DEVNULL)
-                ids = [line.split()[0] for line in output.splitlines() if len(line.split()) >= 3 and line.split()[2] == str(pid)]
+                ids = [line.split()[0] for line in output.splitlines() if len(line.split()) >= 3 and line.split()[2] in {str(candidate) for candidate in pids}]
                 for index, window_id in enumerate(ids):
                     state = "remove,hidden" if visible else "add,hidden"
                     subprocess.run([wmctrl, "-ir", window_id, "-b", state], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -851,20 +914,49 @@ class WindowController:
                 pass
         xdotool = shutil.which("xdotool")
         if not xdotool:
+            local_tool = Path.home() / ".local" / "bin" / "xdotool"
+            if local_tool.is_file() and os.access(local_tool, os.X_OK):
+                xdotool = str(local_tool)
+        if not xdotool:
             return
         try:
-            output = subprocess.check_output([xdotool, "search", "--pid", str(pid)], text=True, stderr=subprocess.DEVNULL)
-            for index, window_id in enumerate(output.split()):
+            window_ids = self._x11_owned_windows(set(pids))
+            for candidate in pids:
+                try:
+                    output = subprocess.check_output([xdotool, "search", "--pid", str(candidate)], text=True, stderr=subprocess.DEVNULL, timeout=3)
+                except subprocess.CalledProcessError:
+                    continue  # Launchers often have no windows of their own.
+                window_ids.extend(window_id for window_id in output.split() if window_id not in window_ids)
+            for index, window_id in enumerate(window_ids):
                 command = "windowmap" if visible else "windowunmap"
                 subprocess.run([xdotool, command, window_id], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 if focus and visible and index == 0:
-                    subprocess.run([xdotool, "windowactivate", "--sync", window_id], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run([xdotool, "windowactivate", "--sync", window_id], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
         except (OSError, subprocess.SubprocessError):
             pass
+
+    def _check_window_control(self):
+        """Run once on the Tk caller thread; never open dialogs from the worker."""
+        if self._preflight_checked or platform.system() != "Linux":
+            return
+        self._preflight_checked = True
+        local_tool = Path.home() / ".local" / "bin" / "xdotool"
+        problems = []
+        if not os.environ.get("DISPLAY"):
+            problems.append("未检测到 X11 显示服务（DISPLAY），无法控制其他程序的窗口。")
+        elif os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
+            problems.append("当前为 Wayland 会话，只能尝试控制 XWayland 窗口；原生 Wayland 窗口无法通过此功能前置。可登录 X11/Xorg 会话后重试。")
+        if not (shutil.which("wmctrl") or shutil.which("xdotool") or
+                (local_tool.is_file() and os.access(local_tool, os.X_OK))):
+            problems.append("缺少 wmctrl/xdotool，窗口显示、隐藏和前置无法生效。Ubuntu 可执行：sudo apt install xdotool。安装后重新打开应用。")
+        if problems and self.root is not None:
+            messagebox.showwarning("窗口控制自检", "\n\n".join(problems) +
+                                   "\n\n进程启动和日志不受影响。本次运行不再重复提示。", parent=self.root)
 
     def set_visible(self, managed: ManagedProcess, visible: bool, focus: bool = False) -> None:
         if managed.process is None or not managed.running:
             return
+        self._check_window_control()
         key = (id(managed), managed.process.pid)
         with self._visibility_lock:
             if self._last_visibility.get(key) == visible and not focus:
@@ -1244,6 +1336,7 @@ class WorkflowDialog(tk.Toplevel):
         self.after_idle(self._present)
 
     def _present(self):
+        style_dialog(self)
         self.update_idletasks()
         self.deiconify()
         self.lift()
@@ -1457,6 +1550,7 @@ class ProcessDialog(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.destroy)
     def _present(self):
         if self.winfo_exists():
+            style_dialog(self)
             self.update_idletasks()
             self.deiconify()
             self.lift()
@@ -1516,11 +1610,14 @@ class GroupRemoveDialog(tk.Toplevel):
         ttk.Button(buttons, text=self._t("no"), command=lambda: choose("cancel")).pack(side="left", padx=8)
         ttk.Button(buttons, text=self._t("yes"), command=lambda: choose("delete")).pack(side="left")
         self.bind("<Escape>", lambda _event: choose("cancel"))
+        style_dialog(self)
 
 
 class App(tk.Tk):
     def __init__(self):
-        super().__init__()
+        super().__init__(className="IntegratedTerm")
+        self._app_icon = tk.PhotoImage(master=self, file=str(APP_DIR / "assets" / "integrated-term-icon-opaque.png"))
+        self.iconphoto(True, self._app_icon)
         self.lang = "zh"
         self.title("集成终端控制台")
         self.title(self._t("app_title"))
@@ -1560,7 +1657,8 @@ class App(tk.Tk):
         self._load_specs()
         self.after(100, self._tick)
         self.protocol("WM_DELETE_WINDOW", self._close)
-        self.bind_all("<Command-q>", self._command_quit)
+        quit_shortcut = "<Command-q>" if platform.system() == "Darwin" else "<Control-q>"
+        self.bind_all(quit_shortcut, self._command_quit)
         if platform.system() == "Darwin":
             try:
                 self.tk.createcommand("tk::mac::Quit", self._close)
@@ -1738,6 +1836,8 @@ class App(tk.Tk):
             self.log.tag_configure(tag, foreground=color)
         self.log.pack(fill="both", expand=True, padx=4, pady=4)
         self.log.bind("<KeyPress>", self._log_keypress)
+        self._bind_log_follow(self.log)
+        self.log.bind("<Command-q>" if platform.system() == "Darwin" else "<Control-q>", self._command_quit)
         footer = ttk.Frame(self, style="TFrame")
         footer.pack(fill="x", padx=24, pady=(0, 10))
         self.status = ttk.Label(footer, text=self._t("ready"), style="Muted.TLabel")
@@ -1924,6 +2024,8 @@ class App(tk.Tk):
         self.process_terminal_text = tk.Text(panel.content, bg="#f8fafc", fg="#263a54", relief="flat", borderwidth=0, highlightthickness=0, wrap="none", font=ui_font(self, fixed=True), spacing1=3, spacing3=3, padx=14, pady=14)
         self.process_terminal_text.pack(fill="both", expand=True)
         self.process_terminal_text.bind("<KeyPress>", self._log_keypress)
+        self._bind_log_follow(self.process_terminal_text)
+        self.process_terminal_text.bind("<Command-q>" if platform.system() == "Darwin" else "<Control-q>", self._command_quit)
         window.protocol("WM_DELETE_WINDOW", self._close_process_terminal_window)
         self._refresh_process_terminal()
 
@@ -1938,6 +2040,8 @@ class App(tk.Tk):
         output = self.process_terminal_text
         status = self.process_terminal_status
         if output is None or status is None or not output.winfo_exists():
+            return
+        if self._log_follow_paused(output, self.selected):
             return
         output.configure(state="normal")
         output.delete("1.0", "end")
@@ -2647,6 +2751,9 @@ class App(tk.Tk):
     def _show_log(self, item):
         self._log_render_id += 1
         render_id = self._log_render_id
+        self._refresh_process_terminal()
+        if self._log_follow_paused(self.log, item):
+            return
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         if not item:
@@ -2658,7 +2765,7 @@ class App(tk.Tk):
         self.log_status.configure(text=f"{self._item_name(item)}  /  {len(item.lines)} {self._t('lines')} / {suffix}")
         self._refresh_process_terminal()
         def render_chunk(offset=0):
-            if render_id != self._log_render_id:
+            if render_id != self._log_render_id or self._log_follow_paused(self.log, item):
                 return
             for line in lines[offset:offset + 60]:
                 for text, tag in ansi_segments(line):
@@ -2671,10 +2778,56 @@ class App(tk.Tk):
                 self.log.see("end")
         render_chunk()
 
+    def _bind_log_follow(self, output):
+        output._follow_paused = False
+        output._follow_item = None
+        output._follow_away = False
+        output.bind("<<Selection>>", lambda event: self._log_selection_changed(output), add="+")
+        output.bind("<FocusOut>", lambda event: self._resume_log_follow(output), add="+")
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>", "<KeyRelease>", "<ButtonRelease-1>"):
+            output.bind(sequence, lambda event, widget=output: widget.after_idle(lambda: self._log_user_scrolled(widget)), add="+")
+
+    def _log_selection_changed(self, output):
+        if output.focus_get() is output and output.tag_ranges("sel"):
+            output._follow_paused = True
+            output._follow_away = output.yview()[1] < 0.999
+
+    def _log_follow_paused(self, output, item):
+        if getattr(output, "_follow_item", None) is not item:
+            output._follow_item = item
+            output._follow_paused = False
+            output._follow_away = False
+        self._log_selection_changed(output)
+        return getattr(output, "_follow_paused", False)
+
+    def _log_user_scrolled(self, output):
+        if not output.winfo_exists():
+            return
+        at_end = output.yview()[1] >= 0.999
+        if not at_end:
+            output._follow_away = True
+            output._follow_paused = True
+        elif getattr(output, "_follow_away", False):
+            self._resume_log_follow(output)
+
+    def _resume_log_follow(self, output):
+        if not getattr(output, "_follow_paused", False):
+            return
+        output._follow_paused = False
+        output._follow_away = False
+        output.tag_remove("sel", "1.0", "end")
+        if output is self.log:
+            self._show_log(self.selected)
+        else:
+            self._refresh_process_terminal()
+        output.see("end")
+
     def _log_keypress(self, event):
         # Keep the log read-only while allowing normal mouse selection and
         # platform copy shortcuts (Cmd+C on macOS, Ctrl+C elsewhere).
         if event.keysym.lower() == "c" and (event.state & (0x4 | 0x8)):
+            return
+        if event.keysym in {"Up", "Down", "Left", "Right", "Prior", "Next", "Home", "End", "Tab"}:
             return
         return "break"
 
@@ -2722,12 +2875,34 @@ class App(tk.Tk):
         for item in targets:
             if item.running:
                 self.manager.stop(item)
-        self.after(180, lambda: self._restart_remaining(targets))
+        # Each new restart request supersedes any older pending request.
+        generation = self.__dict__.get("_restart_generation", 0) + 1
+        self._restart_generation = generation
+        deadline = time.monotonic() + 15
+        self.after(100, lambda: self._restart_remaining(targets, deadline, generation))
 
-    def _restart_remaining(self, targets):
+    def _restart_remaining(self, targets, deadline=None, generation=None):
+        if generation is not None and generation != self._restart_generation:
+            return
+        if deadline is None:
+            deadline = time.monotonic() + 15
+        pending = []
         for item in targets:
-            if item in self.manager.items and not item.running:
+            if item not in self.manager.items:
+                continue
+            # The launcher may exit before its descendants finish cleanup.
+            if item.running or item.stopping:
+                pending.append(item)
+            else:
                 self.manager.start(item)
+        if pending:
+            if time.monotonic() < deadline:
+                self.after(100, lambda: self._restart_remaining(pending, deadline, generation))
+            else:
+                names = ", ".join(item.spec.name for item in pending)
+                for item in pending:
+                    item.lines.append("[restart error] Timed out waiting for process tree to stop; restart cancelled.")
+                messagebox.showwarning("重启失败 / Restart failed", f"等待进程退出超时，未启动新实例：{names}", parent=self._dialog_parent())
         self._save_config()
 
     def _gui_cell_click(self, event):

@@ -12,6 +12,41 @@ PROJECT_DIR = APP.parent
 
 
 class UiContractTests(unittest.TestCase):
+    def test_quit_shortcut_reaches_exit_from_tree_and_readonly_logs(self):
+        import tempfile
+        import platform
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location("integrated_term_quit", APP)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        try:
+            probe = tk.Tk()
+            probe.destroy()
+        except tk.TclError as exc:
+            self.skipTest(f"Tk display unavailable: {exc}")
+        shortcut = "<Command-q>" if platform.system() == "Darwin" else "<Control-q>"
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            module, "CONFIG_PATH", pathlib.Path(directory) / "processes.json"
+        ), patch.object(module, "prune_registry"), patch.object(module.App, "_close") as close:
+            window = module.App()
+            try:
+                window.update()
+                window._toggle_process_terminal_window()
+                window.update()
+                for widget in (window.tree, window.log, window.process_terminal_text):
+                    with self.subTest(widget=str(widget)):
+                        widget.focus_force()
+                        window.update()
+                        close.reset_mock()
+                        widget.event_generate(shortcut)
+                        window.update()
+                        close.assert_called_once_with()
+            finally:
+                for callback in window.tk.call("after", "info"):
+                    window.after_cancel(callback)
+                window.destroy()
+
     def setUp(self):
         self.source = APP.read_text(encoding="utf-8")
         self.tree = ast.parse(self.source)
