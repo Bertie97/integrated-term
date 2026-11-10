@@ -1,0 +1,9 @@
+[project]
+name = "integrated-term-launcher"
+version = "0.1.0"
+description = "uv launcher for Integrated Term"
+requires-python = ">=3.13.13,<3.14"
+dependencies = []
+
+[tool.uv]
+package = false
