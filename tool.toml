@@ -1,5 +1,8 @@
-name = "集成终端"
+name = "集成终端 2"
 description = "集中启动实验进程并查看日志。"
 category = "进程与环境"
 command = ["uv","run","--locked","python","app.py"]
 readme = "README.md"
+
+[bci_tools]
+target = "tools/integrated-term-2"
